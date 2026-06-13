@@ -148,12 +148,15 @@ load_user_langs()
 # 基礎関数群
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def get_default_role_counts(n):
-    if n <= 4: return {"navigator": 0, "passenger": max(0, n-1), "charon": 1, "hades": 0}
-    if n == 5: return {"navigator": 1, "passenger": 2, "charon": 1, "hades": 1}
-    if n == 6: return {"navigator": 1, "passenger": 3, "charon": 1, "hades": 1}
-    if n == 7: return {"navigator": 2, "passenger": 3, "charon": 2, "hades": 0}
-    if n == 8: return {"navigator": 2, "passenger": 3, "charon": 2, "hades": 1}
-    return {"navigator": 2, "passenger": max(4, n - 5), "charon": 2, "hades": 1}
+    if n <= 4: return {"navigator": 0, "passenger": max(0, n-1), "charon": 1, "hades": 0, "siren": 0}
+    if n == 5: return {"navigator": 1, "passenger": 2, "charon": 1, "hades": 1, "siren": 0}
+    if n == 6: return {"navigator": 1, "passenger": 3, "charon": 1, "hades": 1, "siren": 0}
+    if n == 7: return {"navigator": 2, "passenger": 3, "charon": 2, "hades": 0, "siren": 0}
+    if n == 8: return {"navigator": 2, "passenger": 3, "charon": 2, "hades": 1, "siren": 0}
+    return {"navigator": 2, "passenger": max(4, n - 5), "charon": 2, "hades": 1, "siren": 0}
+
+def has_siren(game):
+    return any(r == "siren" for r in game.get("roles", {}).values())
 
 def make_progress_bar(current, target):
     filled = min(current, target)
@@ -222,6 +225,7 @@ class RulesView(discord.ui.View):
             discord.SelectOption(label=t(lang, "rules", "passenger", "title"), value="passenger", emoji="🧑‍💼"),
             discord.SelectOption(label=t(lang, "rules", "charon", "title"), value="charon", emoji="💀"),
             discord.SelectOption(label=t(lang, "rules", "hades", "title"), value="hades", emoji="👑"),
+            discord.SelectOption(label=t(lang, "rules", "siren", "title"), value="siren", emoji="🧜"),
             discord.SelectOption(label=t(lang, "rules", "ghost", "title"), value="ghost", emoji="👻")
         ]
         self.role_select = discord.ui.Select(placeholder=t(lang, "ui", "select_role_rule"), options=role_options, custom_id="rule_role")
@@ -380,6 +384,27 @@ class ResultRevealView(discord.ui.View):
                 if target_user and target_user not in game["dead"]:
                     results[target_user]["dest"] = "lounge_overwrite"
 
+        # ── セイレーンの呼び寄せ（亡霊の上書き後・display付与前・攻撃判定前）──
+        game.setdefault("sirened", [])  # 過去に呼び寄せ成功した相手のid（対象1人につき1回）
+        sirened_today = set()
+        for siren_p, m_target in game.get("mermaids", {}).items():
+            if m_target == "none": continue
+            if game["roles"].get(siren_p) != "siren": continue
+            if siren_p in game["dead"]: continue
+            # セイレーン自身が操舵室を伏せたときのみ発動
+            if game["inputs"].get(siren_p, {}).get("dest") != "bridge": continue
+            target_user = discord.utils.get(game["players"], id=int(m_target))
+            if not target_user or target_user in game["dead"]: continue
+            if target_user.id in game["sirened"]: continue          # 対象1人1回
+            if target_user in sirened_today: continue               # 同ターン重複不可
+            # 亡霊の上書きが優先：その対象が亡霊に上書きされていたら発動せず、回数も消費しない
+            if results[target_user]["dest"] == "lounge_overwrite": continue
+            # 発動：操舵室＋〇に上書き
+            results[target_user]["dest"] = "bridge"
+            results[target_user]["card"] = "c"
+            sirened_today.add(target_user)
+            game["sirened"].append(target_user.id)
+
         for p, data in results.items():
             if p in game["dead"]:
                 if data["ghost_target"] == "none":
@@ -410,6 +435,11 @@ class ResultRevealView(discord.ui.View):
                     data["display"] = t(g_lang, "display", "dest_lounge_ow")
                     data["history_emoji"] = "⛔"
 
+        # セイレーンに呼び寄せられた人は🧜で明示（攻撃で死亡すれば後段の💀で上書きされる）
+        for target_user in sirened_today:
+            results[target_user]["display"] = t(g_lang, "display", "siren_dragged")
+            results[target_user]["history_emoji"] = "🧜"
+
         new_dead = []
         for p_charon, target_id in game.get("attacks", {}).items():
             if target_id != "none" and game["roles"][p_charon] == "charon" and p_charon not in game["dead"] and p_charon not in new_dead:
@@ -433,7 +463,7 @@ class ResultRevealView(discord.ui.View):
         game["dead"] = list(set(game["dead"]))
         game["day_results"] = results 
 
-        lib_users = [p for p, data in results.items() if data["dest"] == "library"]
+        lib_users = [p for p, data in results.items() if data["dest"] == "library" and p not in new_dead]
         valid_library_user = lib_users[0] if len(lib_users) == 1 else None
         game["library_used_today"] = False
 
@@ -769,6 +799,16 @@ class VoteResultRevealView(discord.ui.View):
         desc += f"O: {c_bar} ({game['pt']['c']} / {game['settings']['win_c']} pt)\n"
         desc += f"X: {x_bar} ({game['pt']['x']} / {game['settings']['win_x']} pt)\n"
         
+        if game_over:
+            total_players = len(game["players"])
+            reveal_lines = []
+            for idx, p in enumerate(game["players"]):
+                emoji = get_player_number_emoji(idx, total_players)
+                role_name = t(g_lang, "roles", game["roles"][p])
+                skull = " 💀" if p in game["dead"] else ""
+                reveal_lines.append(t(g_lang, "msg", "role_reveal_line", emoji=emoji, name=p.display_name, role=role_name, skull=skull))
+            desc += "\n" + "\n".join(reveal_lines) + "\n"
+        
         embed = discord.Embed(title=embed_title, description=desc, color=embed_color)
 
         if game_over:
@@ -813,6 +853,7 @@ class NextDayView(discord.ui.View):
         game.pop("vote_end_time", None)
         game["inputs"] = {}
         game["attacks"] = {}
+        game["mermaids"] = {}
         game["votes"] = {}
         
         game["blocked_yesterday"] = []
@@ -841,13 +882,14 @@ async def update_attack_status_message(channel, game):
     alive_players = [p for p in game["players"] if p not in game.get("dead", [])]
     is_finished = len(game.get("attacks", {})) == len(alive_players)
     embed = discord.Embed(color=0x8B0000)
+    siren = has_siren(game)
     
     if is_finished:
-        embed.title = t(g_lang, "msg", "attack_end_title")
+        embed.title = t(g_lang, "msg", "attack_end_title_siren" if siren else "attack_end_title")
         embed.description = ""
         content_str = ""  
     else:
-        embed.title = t(g_lang, "msg", "attack_status_title")
+        embed.title = t(g_lang, "msg", "attack_status_title_siren" if siren else "attack_status_title")
         embed.description = t(g_lang, "msg", "attack_status_desc", current=len(game.get('attacks', {})), total=len(alive_players))
         content_str = " ".join([p.mention for p in alive_players])
     
@@ -861,7 +903,9 @@ class AttackInputView(discord.ui.View):
         self.channel_id = channel_id
         self.user_lang = user_lang
         game = games[channel_id]
-        options = [discord.SelectOption(label=t(user_lang, "ui", "opt_no_attack"), value="none")]
+        siren = has_siren(game)
+        no_label = t(user_lang, "ui", "opt_no_attack_siren" if siren else "opt_no_attack")
+        options = [discord.SelectOption(label=no_label, value="none")]
         
         for p in game["players"]:
             if p not in game.get("dead", []):
@@ -870,9 +914,10 @@ class AttackInputView(discord.ui.View):
                 options.append(discord.SelectOption(label=p.display_name, value=str(p.id)))
                 
         if len(options) == 1:
-            options = [discord.SelectOption(label=t(user_lang, "ui", "opt_no_attack"), value="none")]
+            options = [discord.SelectOption(label=no_label, value="none")]
 
-        self.target_select = discord.ui.Select(placeholder=t(user_lang, "ui", "select_target_attack"), options=options)
+        sel_ph = t(user_lang, "ui", "select_target_attack_siren" if siren else "select_target_attack")
+        self.target_select = discord.ui.Select(placeholder=sel_ph, options=options)
         self.target_select.callback = self.dummy_callback
         self.add_item(self.target_select)
         self.submit_button.label = t(user_lang, "ui", "btn_submit_attack")
@@ -886,21 +931,52 @@ class AttackInputView(discord.ui.View):
         game = games.get(self.channel_id)
         if not game or interaction.user not in game["players"]: return
         if "attacks" not in game: game["attacks"] = {}
+        if "mermaids" not in game: game["mermaids"] = {}
         if interaction.user in game["attacks"]: return
         if not self.target_select.values: return
 
         target_id = self.target_select.values[0]
-        if game["roles"][interaction.user] != "charon" or interaction.user in game.get("dead", []):
-            target_id = "none"
+        role = game["roles"][interaction.user]
+        is_alive = interaction.user not in game.get("dead", [])
+        my_dest = game["inputs"].get(interaction.user, {}).get("dest", "")
 
-        game["attacks"][interaction.user] = target_id
-        
-        if target_id == "none": 
-            await interaction.response.edit_message(content=t(self.user_lang, "msg", "submit_attack_none"), view=None)
+        if role == "charon" and is_alive:
+            game["attacks"][interaction.user] = target_id
+            if target_id == "none":
+                await interaction.response.edit_message(content=t(self.user_lang, "msg", "submit_attack_none"), view=None)
+            else:
+                t_user = discord.utils.get(game["players"], id=int(target_id))
+                tgt_name = t_user.display_name if t_user else 'Unknown'
+                content = t(self.user_lang, "msg", "submit_attack_target", target=tgt_name)
+                if my_dest != "lounge":
+                    content += t(self.user_lang, "msg", "attack_invalid_warn")
+                await interaction.response.edit_message(content=content, view=None)
+        elif role == "siren" and is_alive:
+            game["attacks"][interaction.user] = "none"   # 入力完了数のカウント用
+            game["mermaids"][interaction.user] = target_id
+            if target_id == "none":
+                await interaction.response.edit_message(content=t(self.user_lang, "msg", "submit_mermaid_none"), view=None)
+            else:
+                t_user = discord.utils.get(game["players"], id=int(target_id))
+                tgt_name = t_user.display_name if t_user else 'Unknown'
+                content = t(self.user_lang, "msg", "submit_mermaid_target", target=tgt_name)
+                if my_dest != "bridge":
+                    content += t(self.user_lang, "msg", "mermaid_invalid_warn")
+                await interaction.response.edit_message(content=content, view=None)
         else:
-            t_user = discord.utils.get(game["players"], id=int(target_id))
-            tgt_name = t_user.display_name if t_user else 'Unknown'
-            await interaction.response.edit_message(content=t(self.user_lang, "msg", "submit_attack_target", target=tgt_name), view=None)
+            game["attacks"][interaction.user] = "none"
+            await interaction.response.edit_message(content=t(self.user_lang, "msg", "submit_attack_none"), view=None)
+
+        await update_attack_status_message(interaction.channel, game)
+
+        alive_players = [p for p in game["players"] if p not in game.get("dead", [])]
+        if len(game["attacks"]) == len(alive_players):
+            if game.get("attack_msg"): await game["attack_msg"].edit(view=None)
+            view = ResultRevealView(self.channel_id, game["host"])
+            await interaction.channel.send(view=view)
+            if my_dest != "lounge":
+                content += t(self.user_lang, "msg", "attack_invalid_warn")
+            await interaction.response.edit_message(content=content, view=None)
 
         await update_attack_status_message(interaction.channel, game)
 
@@ -916,8 +992,9 @@ class TriggerAttackView(discord.ui.View):
         self.channel_id = channel_id
         self.host = host
         g_lang = get_game_lang(channel_id)
-        self.trigger_button.label = t(g_lang, "ui", "btn_input_attack")
-        self.force_next_button.label = t(g_lang, "ui", "btn_force_attack")
+        siren = has_siren(games.get(channel_id, {}))
+        self.trigger_button.label = t(g_lang, "ui", "btn_input_attack_siren" if siren else "btn_input_attack")
+        self.force_next_button.label = t(g_lang, "ui", "btn_force_attack_siren" if siren else "btn_force_attack")
 
     @discord.ui.button(style=discord.ButtonStyle.success, custom_id="btn_trig_atk")
     async def trigger_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -933,7 +1010,7 @@ class TriggerAttackView(discord.ui.View):
             return
             
         view = AttackInputView(self.channel_id, interaction.user, u_lang)
-        msg = t(u_lang, "msg", "attack_prompt")
+        msg = t(u_lang, "msg", "attack_prompt_siren" if has_siren(game) else "attack_prompt")
         await interaction.response.send_message(msg, view=view, ephemeral=True)
 
     @discord.ui.button(style=discord.ButtonStyle.primary, custom_id="btn_force_atk")
@@ -1036,7 +1113,8 @@ class CharonTimerSetupView(discord.ui.View):
         
         alive_players = [p for p in game["players"] if p not in game.get("dead", [])]
         
-        attack_embed = discord.Embed(title=t(g_lang, "msg", "attack_status_title"), color=0x8B0000)
+        siren = has_siren(game)
+        attack_embed = discord.Embed(title=t(g_lang, "msg", "attack_status_title_siren" if siren else "attack_status_title"), color=0x8B0000)
         attack_embed.description = t(g_lang, "msg", "attack_status_desc", current=0, total=len(alive_players))
         
         attack_view = TriggerAttackView(self.channel_id, self.host)
@@ -1182,7 +1260,18 @@ async def update_main_message(channel, game):
     day_num = game.get("day", 1)
     submitted_players = [(p, data) for p, data in game["inputs"].items() if data.get("rank") != "Dead"]
     submitted_players = sorted(submitted_players, key=lambda x: x[1].get("rank_num", 999))
-    lines = [f"{data['rank']} {p.display_name} ({data['time']})" for p, data in submitted_players]
+    lines = []
+    for p, data in submitted_players:
+        if data.get("type") == "ghost":
+            tgt = data.get("target", "none")
+            if tgt == "none":
+                lines.append(t(g_lang, "msg", "line_ghost_none", rank=data['rank'], name=p.display_name, time=data['time']))
+            else:
+                tgt_user = discord.utils.get(game["players"], id=int(tgt))
+                tgt_name = tgt_user.display_name if tgt_user else "Unknown"
+                lines.append(t(g_lang, "msg", "line_ghost_block", rank=data['rank'], name=p.display_name, time=data['time'], target=tgt_name))
+        else:
+            lines.append(f"{data['rank']} {p.display_name} ({data['time']})")
     
     embed = discord.Embed(color=0x4682B4)
     
@@ -1248,11 +1337,8 @@ class TriggerInputView(discord.ui.View):
             x_bar = make_progress_bar(x_pt, win_x)
             
             role_name = t(u_lang, "roles", user_role_key)
-            msg_key = f"action_prompt_{user_role_key}"
-            if user_role_key in ["navigator", "passenger", "charon"]:
-                msg = t(u_lang, "msg", msg_key, role=role_name, c_bar=c_bar, c_pt=c_pt, win_c=win_c, x_bar=x_bar, x_pt=x_pt, win_x=win_x)
-            else:
-                msg = t(u_lang, "msg", "action_prompt_passenger", role=role_name, c_bar=c_bar, c_pt=c_pt, win_c=win_c, x_bar=x_bar, x_pt=x_pt, win_x=win_x)
+            need = game.get("settings", {}).get("need", 2)
+            msg = t(u_lang, "msg", "action_prompt_common", role=role_name, need=need, c_bar=c_bar, c_pt=c_pt, win_c=win_c, x_bar=x_bar, x_pt=x_pt, win_x=win_x)
                 
             await interaction.response.send_message(msg, view=view, ephemeral=True)
 
@@ -1274,13 +1360,14 @@ class TriggerInputView(discord.ui.View):
         await transition_to_charon_phase(interaction.channel, game)
 
 class GameSetupView(discord.ui.View):
-    def __init__(self, host, players, counts, rules, lang):
+    def __init__(self, host, players, counts, rules, lang, apply_prefs=False):
         super().__init__(timeout=None)
         self.host = host
         self.players = players
         self.counts = counts
         self.rules = rules
         self.lang = lang
+        self.apply_prefs = apply_prefs
         
         n = len(players)
         if n <= 5: self.settings = {"need": 2, "win_c": 6, "win_x": 2}
@@ -1329,23 +1416,45 @@ class GameSetupView(discord.ui.View):
             await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
             return
         await interaction.message.delete()
-        await distribute_roles(interaction.channel, self.players, self.counts, self.rules, self.settings)
+        await distribute_roles(interaction.channel, self.players, self.counts, self.rules, self.settings, self.apply_prefs)
 
 class RuleSetupView(discord.ui.View):
-    def __init__(self, host, players, counts, lang):
+    def __init__(self, host, players, counts, lang, apply_prefs=False):
         super().__init__(timeout=None)
         self.host = host
         self.players = players
         self.counts = counts
         self.lang = lang
+        self.apply_prefs = apply_prefs
         n = len(players)
-        use_lib_ghost = (n >= 7)
+        use_lib = (n >= 8)
+        use_ghost = (n >= 7)
         sailor_knows = (n >= 7)
         self.rules = {
-            "navigator": sailor_knows, "charon": True, "hades": True, "h_knows_c": True, "c_knows_h": False, "library": use_lib_ghost, "ghost": use_lib_ghost,
-            "allow_spectate": True
+            "navigator": sailor_knows, "charon": True, "hades": True, "h_knows_c": True, "c_knows_h": False,
+            "siren_knows": True, "s_knows_c": True, "c_knows_s": False, "h_knows_s": False, "s_knows_h": False,
+            "library": use_lib, "ghost": use_ghost, "allow_spectate": True
         }
         self.update_buttons()
+
+    def _visible(self, key):
+        c = self.counts
+        nav = c.get("navigator", 0); chr_ = c.get("charon", 0)
+        hds = c.get("hades", 0); sir = c.get("siren", 0)
+        cond = {
+            "navigator": nav >= 2,
+            "charon": chr_ >= 2,
+            "hades": hds >= 2,
+            "h_knows_c": hds >= 1 and chr_ >= 1,
+            "c_knows_h": hds >= 1 and chr_ >= 1,
+            "siren_knows": sir >= 2,
+            "s_knows_c": sir >= 1 and chr_ >= 1,
+            "c_knows_s": sir >= 1 and chr_ >= 1,
+            "h_knows_s": sir >= 1 and hds >= 1,
+            "s_knows_h": sir >= 1 and hds >= 1,
+            "library": True, "ghost": True, "allow_spectate": True,
+        }
+        return cond.get(key, True)
 
     def update_buttons(self):
         self.clear_items()
@@ -1381,9 +1490,10 @@ class RuleSetupView(discord.ui.View):
             return btn
             
         for k in self.rules.keys():
-            self.add_item(make_toggle(k))
+            if self._visible(k):
+                self.add_item(make_toggle(k))
         
-        next_btn = discord.ui.Button(label=t(self.lang, "ui", "btn_to_win_setting"), style=discord.ButtonStyle.primary, row=2)
+        next_btn = discord.ui.Button(label=t(self.lang, "ui", "btn_to_win_setting"), style=discord.ButtonStyle.primary, row=4)
         async def next_callback(interaction: discord.Interaction):
             update_last_active(interaction.channel_id)
             u_lang = get_user_lang(interaction)
@@ -1391,7 +1501,7 @@ class RuleSetupView(discord.ui.View):
                 await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
                 return
             await interaction.message.delete()
-            view = GameSetupView(self.host, self.players, self.counts, self.rules, self.lang)
+            view = GameSetupView(self.host, self.players, self.counts, self.rules, self.lang, self.apply_prefs)
             embed = discord.Embed(title=t(self.lang, "msg", "setup_detail_title"), color=0x808080)
             embed.description = t(self.lang, "msg", "setup_detail_desc")
             await interaction.channel.send(embed=embed, view=view)
@@ -1406,19 +1516,56 @@ class RoleSetupView(discord.ui.View):
         self.lang = lang
         self.n = len(players)
         self.counts = get_default_role_counts(self.n)
+        self.apply_prefs = False  # デフォルトは反映しない
 
-        roles_keys = ["navigator", "passenger", "charon", "hades"]
+        # Discordは1ビューに最大5行・セレクトは1行占有のため、乗客は自動算出にして
+        # 航海士/カロン/ハデス/セイレーンの4セレクト＋ボタン行(row4)に収める
+        roles_keys = ["navigator", "charon", "hades", "siren"]
         
         self.selects = {}
         for role in roles_keys:
             r_name = t(lang, "roles", role)
             opts = [discord.SelectOption(label=f"{r_name} {i}", value=str(i)) for i in range(16)]
-            sel = discord.ui.Select(placeholder=f"{r_name}: {self.counts[role]}", options=opts)
+            sel = discord.ui.Select(placeholder=f"{r_name}: {self.counts.get(role, 0)}", options=opts)
             sel.callback = self.make_callback(role, sel, r_name)
             self.selects[role] = sel
             self.add_item(sel)
+        self._recompute_passenger()
 
         self.confirm_button.label = t(lang, "ui", "btn_to_detail_setting")
+
+        # 役職希望を反映するか/しないかのトグル(内訳設定画面に配置)
+        self.prefs_btn = discord.ui.Button(style=discord.ButtonStyle.secondary, row=4)
+        self.prefs_btn.label = f"{t(lang, 'settings', 'rule_prefs')}: OFF"
+        self.prefs_btn.callback = self.toggle_prefs
+        self.add_item(self.prefs_btn)
+
+    def _recompute_passenger(self):
+        others = sum(self.counts.get(r, 0) for r in ["navigator", "charon", "hades", "siren"])
+        self.counts["passenger"] = self.n - others
+
+    def build_embed(self):
+        self._recompute_passenger()
+        order = ["navigator", "passenger", "charon", "hades", "siren"]
+        breakdown = " / ".join(f"{t(self.lang, 'roles', r)}: {self.counts.get(r, 0)}" for r in order)
+        embed = discord.Embed(title=t(self.lang, "msg", "setup_role_title"), color=0x808080)
+        desc = t(self.lang, "msg", "setup_role_auto_desc", n=self.n, breakdown=breakdown)
+        if self.counts["passenger"] < 0:
+            desc += "\n⚠️ 役職の合計が参加人数を超えています。減らしてください。"
+        embed.description = desc
+        return embed
+
+    async def toggle_prefs(self, interaction: discord.Interaction):
+        update_last_active(interaction.channel_id)
+        u_lang = get_user_lang(interaction)
+        if interaction.user != self.host:
+            await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
+            return
+        self.apply_prefs = not self.apply_prefs
+        on_off = "ON" if self.apply_prefs else "OFF"
+        self.prefs_btn.style = discord.ButtonStyle.success if self.apply_prefs else discord.ButtonStyle.secondary
+        self.prefs_btn.label = f"{t(self.lang, 'settings', 'rule_prefs')}: {on_off}"
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
     def make_callback(self, role_key, select_obj, r_name):
         async def callback(interaction: discord.Interaction):
@@ -1430,7 +1577,8 @@ class RoleSetupView(discord.ui.View):
             val = int(interaction.data["values"][0])
             self.counts[role_key] = val
             select_obj.placeholder = f"{r_name}: {val}"
-            await interaction.response.edit_message(view=self)
+            self._recompute_passenger()
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
         return callback
 
     @discord.ui.button(style=discord.ButtonStyle.primary, row=4, custom_id="btn_conf_role")
@@ -1440,14 +1588,45 @@ class RoleSetupView(discord.ui.View):
         if interaction.user != self.host:
             await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
             return
-        if sum(self.counts.values()) != self.n:
+        self._recompute_passenger()
+        if self.counts["passenger"] < 0 or sum(self.counts.values()) != self.n:
             await interaction.response.send_message(t(u_lang, "msg", "err_role_count"), ephemeral=True)
             return
         await interaction.message.delete()
-        rule_view = RuleSetupView(self.host, self.players, self.counts, self.lang)
+        rule_view = RuleSetupView(self.host, self.players, self.counts, self.lang, self.apply_prefs)
         embed = discord.Embed(title=t(self.lang, "msg", "setup_rule_title"), color=0x808080)
         embed.description = t(self.lang, "msg", "setup_rule_desc")
         await interaction.channel.send(embed=embed, view=rule_view)
+
+class PrefRoleView(discord.ui.View):
+    """役職希望を選ぶephemeralビュー(締切まで何度でも変更可)"""
+    def __init__(self, recruit_view, user):
+        super().__init__(timeout=300)
+        self.rv = recruit_view
+        self.user = user
+        lang = USER_LANGS.get(user.id, recruit_view.lang)
+        self.lang = lang
+        opts = [
+            discord.SelectOption(label=t(lang, "roles", "navigator"), value="navigator"),
+            discord.SelectOption(label=t(lang, "roles", "passenger"), value="passenger"),
+            discord.SelectOption(label=t(lang, "roles", "charon"), value="charon"),
+            discord.SelectOption(label=t(lang, "roles", "hades"), value="hades"),
+            discord.SelectOption(label=t(lang, "ui", "opt_pref_any"), value="any"),
+        ]
+        sel = discord.ui.Select(placeholder=t(lang, "ui", "select_pref"), options=opts)
+        sel.callback = self.on_select
+        self.add_item(sel)
+
+    async def on_select(self, interaction: discord.Interaction):
+        val = interaction.data["values"][0]
+        if val == "any":
+            self.rv.preferences.pop(self.user, None)
+            role_label = t(self.lang, "ui", "opt_pref_any")
+        else:
+            self.rv.preferences[self.user] = val
+            role_label = t(self.lang, "roles", val)
+        await interaction.response.edit_message(content=t(self.lang, "msg", "pref_set", role=role_label), view=None)
+
 
 class RecruitView(discord.ui.View):
     def __init__(self, host, lang):
@@ -1456,8 +1635,10 @@ class RecruitView(discord.ui.View):
         self.lang = lang
         self.players = set()
         self.spectators = set()
+        self.preferences = {}  # Member -> role_key（具体的な希望のみ。"any"・未指定は保持しない）
         
         self.join_button.label = t(lang, "ui", "btn_join")
+        self.join_pref_button.label = t(lang, "ui", "btn_join_pref")
         self.spectate_button.label = t(lang, "ui", "btn_spectate")
         self.leave_button.label = t(lang, "ui", "btn_leave")
         self.start_button.label = t(lang, "ui", "btn_close_recruit")
@@ -1468,7 +1649,17 @@ class RecruitView(discord.ui.View):
         await interaction.response.defer()
         self.players.add(interaction.user)
         self.spectators.discard(interaction.user)
+        self.preferences.pop(interaction.user, None)
         await self.update_message(interaction)
+
+    @discord.ui.button(style=discord.ButtonStyle.success, row=0, custom_id="btn_join_pref")
+    async def join_pref_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        update_last_active(interaction.channel_id)
+        self.players.add(interaction.user)
+        self.spectators.discard(interaction.user)
+        p_lang = USER_LANGS.get(interaction.user.id, self.lang)
+        await interaction.response.send_message(content=t(p_lang, "msg", "pref_prompt"), view=PrefRoleView(self, interaction.user), ephemeral=True)
+        await self.refresh_main(interaction)
 
     @discord.ui.button(style=discord.ButtonStyle.secondary, row=0, custom_id="btn_spec")
     async def spectate_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1476,6 +1667,7 @@ class RecruitView(discord.ui.View):
         await interaction.response.defer()
         self.spectators.add(interaction.user)
         self.players.discard(interaction.user)
+        self.preferences.pop(interaction.user, None)
         await self.update_message(interaction)
 
     @discord.ui.button(style=discord.ButtonStyle.secondary, row=0, custom_id="btn_leave")
@@ -1484,6 +1676,7 @@ class RecruitView(discord.ui.View):
         await interaction.response.defer()
         self.players.discard(interaction.user)
         self.spectators.discard(interaction.user)
+        self.preferences.pop(interaction.user, None)
         await self.update_message(interaction)
 
     @discord.ui.button(style=discord.ButtonStyle.primary, row=1, custom_id="btn_start_rec")
@@ -1497,38 +1690,81 @@ class RecruitView(discord.ui.View):
         games[interaction.channel_id] = {
             "host": self.host, "players": list(self.players), "spectators": list(self.spectators), "inputs": {}, "dead": [], 
             "blocked_yesterday": [], "history": {}, "day": 1, "used_library": [], "last_active": time.time(),
-            "lang": self.lang 
+            "lang": self.lang,
+            "prefs": {p: r for p, r in self.preferences.items() if p in self.players}
         }
         await interaction.message.delete()
         setup_view = RoleSetupView(host=self.host, players=list(self.players), lang=self.lang)
-        embed = discord.Embed(title=t(self.lang, "msg", "setup_role_title"), color=0x808080)
-        await interaction.channel.send(embed=embed, view=setup_view)
+        await interaction.channel.send(embed=setup_view.build_embed(), view=setup_view)
 
-    async def update_message(self, interaction: discord.Interaction):
+    def build_embed(self):
         player_names = "\n".join([f"- {p.display_name}" for p in self.players]) or "-"
         spectator_names = "\n".join([f"- {s.display_name}" for s in self.spectators]) or "-"
         embed = discord.Embed(title=t(self.lang, "msg", "recruit_title"), color=0x808080)
         embed.description = t(self.lang, "msg", "recruit_desc", host=self.host.display_name, p_count=len(self.players), p_list=player_names, s_count=len(self.spectators), s_list=spectator_names)
-        
-        image_path = "banner.jpg"
-        if os.path.exists(image_path):
+        if os.path.exists("banner.jpg"):
             embed.set_image(url="attachment://banner.jpg")
-            file = discord.File(image_path, filename="banner.jpg")
+        return embed
+
+    async def update_message(self, interaction: discord.Interaction):
+        embed = self.build_embed()
+        if os.path.exists("banner.jpg"):
+            file = discord.File("banner.jpg", filename="banner.jpg")
             await interaction.edit_original_response(embed=embed, view=self, attachments=[file])
         else:
             await interaction.edit_original_response(embed=embed, view=self)
 
-async def distribute_roles(channel, players, counts, rules, settings):
-    roles = []
-    for role_name, count in counts.items(): roles.extend([role_name] * count)
-    random.shuffle(roles)
+    async def refresh_main(self, interaction: discord.Interaction):
+        embed = self.build_embed()
+        if os.path.exists("banner.jpg"):
+            file = discord.File("banner.jpg", filename="banner.jpg")
+            await interaction.message.edit(embed=embed, view=self, attachments=[file])
+        else:
+            await interaction.message.edit(embed=embed, view=self)
+
+def assign_roles_with_prefs(players, counts, prefs):
+    """役職希望を抽選の優先権として反映して役職を割り当てる。
+    prefs: {player: role_key}（具体的な希望のみ。"any"・未指定は含めない）"""
+    remaining = dict(counts)
+    assignment = {}
+    unassigned = list(players)
+    random.shuffle(unassigned)
+    # 役職ごとに希望者を抽選（希望者数 > 枠なら希望者内でランダム抽選）
+    for role in ["navigator", "passenger", "charon", "hades"]:
+        cands = [p for p in unassigned if prefs.get(p) == role]
+        random.shuffle(cands)
+        while cands and remaining.get(role, 0) > 0:
+            p = cands.pop()
+            assignment[p] = role
+            remaining[role] -= 1
+            unassigned.remove(p)
+    # 残りの枠をランダムに割り当て
+    rest_pool = []
+    for role, c in remaining.items():
+        rest_pool.extend([role] * c)
+    random.shuffle(rest_pool)
+    random.shuffle(unassigned)
+    for p, role in zip(unassigned, rest_pool):
+        assignment[p] = role
+    return assignment
+
+
+async def distribute_roles(channel, players, counts, rules, settings, apply_prefs=False):
     game = games[channel.id]
-    game["roles"] = {players[i]: roles[i] for i in range(len(players))}
+    if apply_prefs:
+        prefs = game.get("prefs", {})
+        game["roles"] = assign_roles_with_prefs(players, counts, prefs)
+    else:
+        roles = []
+        for role_name, count in counts.items(): roles.extend([role_name] * count)
+        random.shuffle(roles)
+        game["roles"] = {players[i]: roles[i] for i in range(len(players))}
     game["settings"] = settings
     game["rules"] = rules
     game["pt"] = {"c": 0, "x": 0}
 
     g_lang = get_game_lang(channel.id)
+    failed_dm = []
 
     if not rules.get("ghost", True):
         for p in game.get("dead", []):
@@ -1555,6 +1791,9 @@ async def distribute_roles(channel, players, counts, rules, settings):
             if rules["c_knows_h"]:
                 hades_list = [p.display_name for p, r in game["roles"].items() if r == "hades"]
                 if hades_list: role_msg += t(p_lang, "msg", "dm_charon_hades", others=', '.join(hades_list))
+            if rules.get("c_knows_s"):
+                siren_list = [p.display_name for p, r in game["roles"].items() if r == "siren"]
+                if siren_list: role_msg += t(p_lang, "msg", "dm_charon_siren", others=', '.join(siren_list))
         elif role_key == "hades":
             if rules["hades"]:
                 others = [p.display_name for p, r in game["roles"].items() if r == "hades" and p != player]
@@ -1562,6 +1801,20 @@ async def distribute_roles(channel, players, counts, rules, settings):
             if rules["h_knows_c"]:
                 charons = [p.display_name for p, r in game["roles"].items() if r == "charon"]
                 if charons: role_msg += t(p_lang, "msg", "dm_hades_charon", others=', '.join(charons))
+            if rules.get("h_knows_s"):
+                siren_list = [p.display_name for p, r in game["roles"].items() if r == "siren"]
+                if siren_list: role_msg += t(p_lang, "msg", "dm_hades_siren", others=', '.join(siren_list))
+        elif role_key == "siren":
+            if rules.get("s_knows_c", True):
+                charons = [p.display_name for p, r in game["roles"].items() if r == "charon"]
+                if charons: role_msg += t(p_lang, "msg", "dm_siren_charon", others=', '.join(charons))
+            if rules.get("siren_knows", True):
+                others = [p.display_name for p, r in game["roles"].items() if r == "siren" and p != player]
+                role_msg += t(p_lang, "msg", "dm_siren_ally", others=', '.join(others)) if others else t(p_lang, "msg", "dm_siren_alone")
+            if rules.get("s_knows_h"):
+                hades_list = [p.display_name for p, r in game["roles"].items() if r == "hades"]
+                if hades_list: role_msg += t(p_lang, "msg", "dm_siren_hades", others=', '.join(hades_list))
+            role_msg += t(p_lang, "msg", "dm_siren_note")
 
         raw_image_name = f"{role_key}_{p_lang}.jpg"
         valid_image = get_image_file(raw_image_name, p_lang)
@@ -1573,7 +1826,7 @@ async def distribute_roles(channel, players, counts, rules, settings):
             else:
                 await player.send(content=role_msg)
         except discord.Forbidden:
-            pass
+            failed_dm.append(player)
 
     spectators = game.get("spectators", [])
     if spectators:
@@ -1589,6 +1842,10 @@ async def distribute_roles(channel, players, counts, rules, settings):
             try: await spec.send(content=spec_msg)
             except discord.Forbidden: pass
 
+    for failed in failed_dm:
+        try: await channel.send(t(g_lang, "msg", "dm_failed", name=failed.display_name))
+        except: pass
+
     rule_texts = []
     
     def get_rule_label(key):
@@ -1602,6 +1859,15 @@ async def distribute_roles(channel, players, counts, rules, settings):
     if counts["hades"] >= 1 and counts["charon"] >= 1:
         rule_texts.append(f"{get_rule_label('rule_hds_chr')}: {'ON' if rules['h_knows_c'] else 'OFF'}")
         rule_texts.append(f"{get_rule_label('rule_chr_hds')}: {'ON' if rules['c_knows_h'] else 'OFF'}")
+    # セイレーン関連の認知ルール（0人の役職に関わるものは非表示）
+    if counts.get("siren", 0) >= 2:
+        rule_texts.append(f"{get_rule_label('rule_siren_knows')}: {'ON' if rules.get('siren_knows') else 'OFF'}")
+    if counts.get("siren", 0) >= 1 and counts.get("charon", 0) >= 1:
+        rule_texts.append(f"{get_rule_label('rule_s_knows_c')}: {'ON' if rules.get('s_knows_c') else 'OFF'}")
+        rule_texts.append(f"{get_rule_label('rule_c_knows_s')}: {'ON' if rules.get('c_knows_s') else 'OFF'}")
+    if counts.get("siren", 0) >= 1 and counts.get("hades", 0) >= 1:
+        rule_texts.append(f"{get_rule_label('rule_h_knows_s')}: {'ON' if rules.get('h_knows_s') else 'OFF'}")
+        rule_texts.append(f"{get_rule_label('rule_s_knows_h')}: {'ON' if rules.get('s_knows_h') else 'OFF'}")
     
     lib_text = t(g_lang, "dests", "library")
     if lib_text == "TEXT_NOT_FOUND": lib_text = "Library"
@@ -1611,10 +1877,16 @@ async def distribute_roles(channel, players, counts, rules, settings):
     if ghost_text == "TEXT_NOT_FOUND": ghost_text = "Ghost"
     rule_texts.append(f"{ghost_text}: {'ON' if rules['ghost'] else 'OFF'}")
     
+    prefs_text = get_rule_label('rule_prefs')
+    rule_texts.append(f"{prefs_text}: {'ON' if apply_prefs else 'OFF'}")
+    
+    rule_texts.append(t(g_lang, "msg", "rule_need", n=settings.get("need", 2)))
+    
     rule_str = "\n".join(rule_texts)
     
     order = ["navigator", "passenger", "charon", "hades"]
-    breakdown_str = " / ".join([f"{t(g_lang, 'roles', r)}: {counts[r]}" for r in order])
+    if counts.get("siren", 0) > 0: order.append("siren")
+    breakdown_str = " / ".join([f"{t(g_lang, 'roles', r)}: {counts.get(r, 0)}" for r in order])
     
     win_c = settings['win_c']
     win_x = settings['win_x']
@@ -1757,7 +2029,9 @@ async def cleanup_inactive_games():
     current_time = time.time()
     to_delete = []
     for channel_id, game in games.items():
-        if current_time - game.get("last_active", current_time) > 86400:
+        # 募集段階(まだ開始していない)は1時間、ゲーム進行中は24時間で自動終了
+        threshold = 86400 if "players" in game else 3600
+        if current_time - game.get("last_active", current_time) > threshold:
             to_delete.append(channel_id)
             
     for channel_id in to_delete:
