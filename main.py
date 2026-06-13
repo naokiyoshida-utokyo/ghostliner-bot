@@ -1928,8 +1928,10 @@ async def distribute_roles(channel, players, counts, rules, settings, apply_pref
         if label == "TEXT_NOT_FOUND": return get_setting_label(g_lang, key) 
         return label
         
-    rule_texts.append(f"{get_rule_label('rule_nav_knows')}: {'ON' if rules['navigator'] else 'OFF'}")
-    rule_texts.append(f"{get_rule_label('rule_chr_knows')}: {'ON' if rules['charon'] else 'OFF'}")
+    if counts.get("navigator", 0) >= 2:
+        rule_texts.append(f"{get_rule_label('rule_nav_knows')}: {'ON' if rules['navigator'] else 'OFF'}")
+    if counts.get("charon", 0) >= 2:
+        rule_texts.append(f"{get_rule_label('rule_chr_knows')}: {'ON' if rules['charon'] else 'OFF'}")
     if counts["hades"] >= 2: rule_texts.append(f"{get_rule_label('rule_hds_knows')}: {'ON' if rules['hades'] else 'OFF'}")
     if counts["hades"] >= 1 and counts["charon"] >= 1:
         rule_texts.append(f"{get_rule_label('rule_hds_chr')}: {'ON' if rules['h_knows_c'] else 'OFF'}")
