@@ -225,7 +225,7 @@ class RulesView(discord.ui.View):
             discord.SelectOption(label=t(lang, "rules", "passenger", "title"), value="passenger", emoji="🧑‍💼"),
             discord.SelectOption(label=t(lang, "rules", "charon", "title"), value="charon", emoji="💀"),
             discord.SelectOption(label=t(lang, "rules", "hades", "title"), value="hades", emoji="👑"),
-            discord.SelectOption(label=t(lang, "rules", "siren", "title"), value="siren", emoji="🧜"),
+            discord.SelectOption(label=t(lang, "rules", "siren", "title"), value="siren", emoji="🎶"),
             discord.SelectOption(label=t(lang, "rules", "ghost", "title"), value="ghost", emoji="👻")
         ]
         self.role_select = discord.ui.Select(placeholder=t(lang, "ui", "select_role_rule"), options=role_options, custom_id="rule_role")
@@ -435,10 +435,10 @@ class ResultRevealView(discord.ui.View):
                     data["display"] = t(g_lang, "display", "dest_lounge_ow")
                     data["history_emoji"] = "⛔"
 
-        # セイレーンに呼び寄せられた人は🧜で明示（攻撃で死亡すれば後段の💀で上書きされる）
+        # セイレーンに呼び寄せられた人は🎶で明示（攻撃で死亡すれば後段の💀で上書きされる）
         for target_user in sirened_today:
             results[target_user]["display"] = t(g_lang, "display", "siren_dragged")
-            results[target_user]["history_emoji"] = "🧜"
+            results[target_user]["history_emoji"] = "🎶"
 
         new_dead = []
         for p_charon, target_id in game.get("attacks", {}).items():
@@ -890,7 +890,7 @@ async def update_attack_status_message(channel, game):
         content_str = ""  
     else:
         embed.title = t(g_lang, "msg", "attack_status_title_siren" if siren else "attack_status_title")
-        embed.description = t(g_lang, "msg", "attack_status_desc", current=len(game.get('attacks', {})), total=len(alive_players))
+        embed.description = t(g_lang, "msg", "attack_status_desc_siren" if siren else "attack_status_desc", current=len(game.get('attacks', {})), total=len(alive_players))
         content_str = " ".join([p.mention for p in alive_players])
     
     if game.get("attack_status_msg"):
@@ -1115,7 +1115,7 @@ class CharonTimerSetupView(discord.ui.View):
         
         siren = has_siren(game)
         attack_embed = discord.Embed(title=t(g_lang, "msg", "attack_status_title_siren" if siren else "attack_status_title"), color=0x8B0000)
-        attack_embed.description = t(g_lang, "msg", "attack_status_desc", current=0, total=len(alive_players))
+        attack_embed.description = t(g_lang, "msg", "attack_status_desc_siren" if siren else "attack_status_desc", current=0, total=len(alive_players))
         
         attack_view = TriggerAttackView(self.channel_id, self.host)
         
@@ -1201,6 +1201,11 @@ class ActionInputView(discord.ui.View):
             dest_options.append(discord.SelectOption(label=t(user_lang, "ui", "opt_lounge_attack"), value="lounge"))
         elif user_role_key == "navigator":
             dest_options.append(discord.SelectOption(label=t(user_lang, "ui", "opt_bridge_c"), value="bridge_c"))
+        elif user_role_key == "siren":
+            dest_options.append(discord.SelectOption(label=t(user_lang, "ui", "opt_bridge_c_siren"), value="bridge_c"))
+            if game.get("rules", {}).get("library", True) and user_id not in game.get("used_library", []):
+                dest_options.append(discord.SelectOption(label=t(user_lang, "ui", "opt_library"), value="library"))
+            dest_options.append(discord.SelectOption(label=t(user_lang, "ui", "opt_lounge"), value="lounge"))
         else:
             dest_options.append(discord.SelectOption(label=t(user_lang, "ui", "opt_bridge_c"), value="bridge_c"))
             if game.get("rules", {}).get("library", True) and user_id not in game.get("used_library", []):
@@ -1509,6 +1514,14 @@ class RuleSetupView(discord.ui.View):
         self.add_item(next_btn)
 
 class RoleSetupView(discord.ui.View):
+    # 陣営ごとの役職と＋/－ボタンの行配置（Discordは1行最大5ボタン・最大5行）
+    LAYOUT = [
+        (0, ["navigator", "passenger"]),  # 人間陣営: 航海士＋－ 乗客＋－
+        (1, ["charon", "hades"]),          # カロン陣営: カロン＋－ ハデス＋－
+        (2, ["siren"]),                    # カロン陣営: セイレーン＋－
+    ]
+    ALL_ROLES = ["navigator", "passenger", "charon", "hades", "siren"]
+
     def __init__(self, host, players, lang):
         super().__init__(timeout=None)
         self.host = host
@@ -1517,79 +1530,84 @@ class RoleSetupView(discord.ui.View):
         self.n = len(players)
         self.counts = get_default_role_counts(self.n)
         self.apply_prefs = False  # デフォルトは反映しない
+        self._build_items()
 
-        # Discordは1ビューに最大5行・セレクトは1行占有のため、乗客は自動算出にして
-        # 航海士/カロン/ハデス/セイレーンの4セレクト＋ボタン行(row4)に収める
-        roles_keys = ["navigator", "charon", "hades", "siren"]
-        
-        self.selects = {}
-        for role in roles_keys:
-            r_name = t(lang, "roles", role)
-            opts = [discord.SelectOption(label=f"{r_name} {i}", value=str(i)) for i in range(16)]
-            sel = discord.ui.Select(placeholder=f"{r_name}: {self.counts.get(role, 0)}", options=opts)
-            sel.callback = self.make_callback(role, sel, r_name)
-            self.selects[role] = sel
-            self.add_item(sel)
-        self._recompute_passenger()
-
-        self.confirm_button.label = t(lang, "ui", "btn_to_detail_setting")
-
-        # 役職希望を反映するか/しないかのトグル(内訳設定画面に配置)
-        self.prefs_btn = discord.ui.Button(style=discord.ButtonStyle.secondary, row=4)
-        self.prefs_btn.label = f"{t(lang, 'settings', 'rule_prefs')}: OFF"
-        self.prefs_btn.callback = self.toggle_prefs
+    def _build_items(self):
+        self.clear_items()
+        for row, roles in self.LAYOUT:
+            for role in roles:
+                self.add_item(self._adj_button(role, +1, row))
+                self.add_item(self._adj_button(role, -1, row))
+        # 決定ボタン(row3)
+        confirm = discord.ui.Button(label=t(self.lang, "ui", "btn_to_detail_setting"),
+                                    style=discord.ButtonStyle.primary, row=3)
+        confirm.callback = self._confirm
+        self.add_item(confirm)
+        # 役職希望トグル(row4)
+        on_off = "ON" if self.apply_prefs else "OFF"
+        self.prefs_btn = discord.ui.Button(
+            label=f"{t(self.lang, 'settings', 'rule_prefs')}: {on_off}",
+            style=discord.ButtonStyle.success if self.apply_prefs else discord.ButtonStyle.secondary,
+            row=4)
+        self.prefs_btn.callback = self._toggle_prefs
         self.add_item(self.prefs_btn)
 
-    def _recompute_passenger(self):
-        others = sum(self.counts.get(r, 0) for r in ["navigator", "charon", "hades", "siren"])
-        self.counts["passenger"] = self.n - others
+    def _adj_button(self, role, delta, row):
+        sym = "＋" if delta > 0 else "－"
+        r_name = t(self.lang, "roles", role)
+        style = discord.ButtonStyle.success if delta > 0 else discord.ButtonStyle.secondary
+        btn = discord.ui.Button(label=f"{r_name} {sym}", style=style, row=row)
+        async def cb(interaction: discord.Interaction):
+            update_last_active(interaction.channel_id)
+            u_lang = get_user_lang(interaction)
+            if interaction.user != self.host:
+                await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
+                return
+            new = max(0, min(15, self.counts.get(role, 0) + delta))
+            self.counts[role] = new
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        btn.callback = cb
+        return btn
+
+    def _total(self):
+        return sum(self.counts.get(r, 0) for r in self.ALL_ROLES)
 
     def build_embed(self):
-        self._recompute_passenger()
-        order = ["navigator", "passenger", "charon", "hades", "siren"]
-        breakdown = " / ".join(f"{t(self.lang, 'roles', r)}: {self.counts.get(r, 0)}" for r in order)
-        embed = discord.Embed(title=t(self.lang, "msg", "setup_role_title"), color=0x808080)
-        desc = t(self.lang, "msg", "setup_role_auto_desc", n=self.n, breakdown=breakdown)
-        if self.counts["passenger"] < 0:
-            desc += "\n⚠️ 役職の合計が参加人数を超えています。減らしてください。"
-        embed.description = desc
+        lines = [t(self.lang, "msg", "faction_human")]
+        for r in ["navigator", "passenger"]:
+            lines.append(f"　{t(self.lang, 'roles', r)}: {self.counts.get(r, 0)}")
+        lines.append("")
+        lines.append(t(self.lang, "msg", "faction_charon"))
+        for r in ["charon", "hades", "siren"]:
+            lines.append(f"　{t(self.lang, 'roles', r)}: {self.counts.get(r, 0)}")
+        lines.append("")
+        total = self._total()
+        lines.append(t(self.lang, "msg", "setup_role_total", n=self.n, total=total))
+        if total != self.n:
+            lines.append(t(self.lang, "msg", "setup_role_total_warn"))
+        else:
+            lines.append(t(self.lang, "msg", "setup_role_total_ok"))
+        embed = discord.Embed(title=t(self.lang, "msg", "setup_role_title"),
+                              description="\n".join(lines), color=0x808080)
         return embed
 
-    async def toggle_prefs(self, interaction: discord.Interaction):
+    async def _toggle_prefs(self, interaction: discord.Interaction):
         update_last_active(interaction.channel_id)
         u_lang = get_user_lang(interaction)
         if interaction.user != self.host:
             await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
             return
         self.apply_prefs = not self.apply_prefs
-        on_off = "ON" if self.apply_prefs else "OFF"
-        self.prefs_btn.style = discord.ButtonStyle.success if self.apply_prefs else discord.ButtonStyle.secondary
-        self.prefs_btn.label = f"{t(self.lang, 'settings', 'rule_prefs')}: {on_off}"
+        self._build_items()
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
-    def make_callback(self, role_key, select_obj, r_name):
-        async def callback(interaction: discord.Interaction):
-            update_last_active(interaction.channel_id)
-            u_lang = get_user_lang(interaction)
-            if interaction.user != self.host:
-                await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
-                return
-            val = int(interaction.data["values"][0])
-            self.counts[role_key] = val
-            select_obj.placeholder = f"{r_name}: {val}"
-            self._recompute_passenger()
-            await interaction.response.edit_message(embed=self.build_embed(), view=self)
-        return callback
-
-    @discord.ui.button(style=discord.ButtonStyle.primary, row=4, custom_id="btn_conf_role")
-    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _confirm(self, interaction: discord.Interaction):
         update_last_active(interaction.channel_id)
         u_lang = get_user_lang(interaction)
         if interaction.user != self.host:
             await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
             return
-        self._recompute_passenger()
-        if self.counts["passenger"] < 0 or sum(self.counts.values()) != self.n:
+        if self._total() != self.n:
             await interaction.response.send_message(t(u_lang, "msg", "err_role_count"), ephemeral=True)
             return
         await interaction.message.delete()
@@ -1599,33 +1617,55 @@ class RoleSetupView(discord.ui.View):
         await interaction.channel.send(embed=embed, view=rule_view)
 
 class PrefRoleView(discord.ui.View):
-    """役職希望を選ぶephemeralビュー(締切まで何度でも変更可)"""
+    """役職希望を選ぶephemeralビュー（なりたい/なりたくない 各1つ・締切まで変更可）"""
     def __init__(self, recruit_view, user):
         super().__init__(timeout=300)
         self.rv = recruit_view
         self.user = user
         lang = USER_LANGS.get(user.id, recruit_view.lang)
         self.lang = lang
-        opts = [
-            discord.SelectOption(label=t(lang, "roles", "navigator"), value="navigator"),
-            discord.SelectOption(label=t(lang, "roles", "passenger"), value="passenger"),
-            discord.SelectOption(label=t(lang, "roles", "charon"), value="charon"),
-            discord.SelectOption(label=t(lang, "roles", "hades"), value="hades"),
-            discord.SelectOption(label=t(lang, "ui", "opt_pref_any"), value="any"),
-        ]
-        sel = discord.ui.Select(placeholder=t(lang, "ui", "select_pref"), options=opts)
-        sel.callback = self.on_select
-        self.add_item(sel)
 
-    async def on_select(self, interaction: discord.Interaction):
+        role_vals = ["navigator", "passenger", "charon", "hades", "siren"]
+        want_opts = [discord.SelectOption(label=t(lang, "roles", r), value=r) for r in role_vals]
+        want_opts.append(discord.SelectOption(label=t(lang, "ui", "opt_pref_any"), value="any"))
+        self.want_select = discord.ui.Select(placeholder=t(lang, "ui", "select_pref_want"), options=want_opts, row=0)
+        self.want_select.callback = self.on_want
+        self.add_item(self.want_select)
+
+        reject_opts = [discord.SelectOption(label=t(lang, "roles", r), value=r) for r in role_vals]
+        reject_opts.append(discord.SelectOption(label=t(lang, "ui", "opt_pref_none"), value="none"))
+        self.reject_select = discord.ui.Select(placeholder=t(lang, "ui", "select_pref_reject"), options=reject_opts, row=1)
+        self.reject_select.callback = self.on_reject
+        self.add_item(self.reject_select)
+
+    def _status(self):
+        want = self.rv.preferences.get(self.user)
+        reject = self.rv.anti_preferences.get(self.user)
+        want_label = t(self.lang, "roles", want) if want else t(self.lang, "ui", "opt_pref_any")
+        reject_label = t(self.lang, "roles", reject) if reject else t(self.lang, "ui", "opt_pref_none")
+        return t(self.lang, "msg", "pref_status", want=want_label, reject=reject_label)
+
+    async def on_want(self, interaction: discord.Interaction):
         val = interaction.data["values"][0]
         if val == "any":
             self.rv.preferences.pop(self.user, None)
-            role_label = t(self.lang, "ui", "opt_pref_any")
         else:
             self.rv.preferences[self.user] = val
-            role_label = t(self.lang, "roles", val)
-        await interaction.response.edit_message(content=t(self.lang, "msg", "pref_set", role=role_label), view=None)
+            # 後勝ち: なりたくないに同じ役職があれば解除
+            if self.rv.anti_preferences.get(self.user) == val:
+                self.rv.anti_preferences.pop(self.user, None)
+        await interaction.response.edit_message(content=self._status(), view=self)
+
+    async def on_reject(self, interaction: discord.Interaction):
+        val = interaction.data["values"][0]
+        if val == "none":
+            self.rv.anti_preferences.pop(self.user, None)
+        else:
+            self.rv.anti_preferences[self.user] = val
+            # 後勝ち: なりたいに同じ役職があれば解除
+            if self.rv.preferences.get(self.user) == val:
+                self.rv.preferences.pop(self.user, None)
+        await interaction.response.edit_message(content=self._status(), view=self)
 
 
 class RecruitView(discord.ui.View):
@@ -1635,7 +1675,8 @@ class RecruitView(discord.ui.View):
         self.lang = lang
         self.players = set()
         self.spectators = set()
-        self.preferences = {}  # Member -> role_key（具体的な希望のみ。"any"・未指定は保持しない）
+        self.preferences = {}  # Member -> role_key（なりたい：具体的な希望のみ）
+        self.anti_preferences = {}  # Member -> role_key（なりたくない：1つのみ）
         
         self.join_button.label = t(lang, "ui", "btn_join")
         self.join_pref_button.label = t(lang, "ui", "btn_join_pref")
@@ -1650,6 +1691,7 @@ class RecruitView(discord.ui.View):
         self.players.add(interaction.user)
         self.spectators.discard(interaction.user)
         self.preferences.pop(interaction.user, None)
+        self.anti_preferences.pop(interaction.user, None)
         await self.update_message(interaction)
 
     @discord.ui.button(style=discord.ButtonStyle.success, row=0, custom_id="btn_join_pref")
@@ -1668,6 +1710,7 @@ class RecruitView(discord.ui.View):
         self.spectators.add(interaction.user)
         self.players.discard(interaction.user)
         self.preferences.pop(interaction.user, None)
+        self.anti_preferences.pop(interaction.user, None)
         await self.update_message(interaction)
 
     @discord.ui.button(style=discord.ButtonStyle.secondary, row=0, custom_id="btn_leave")
@@ -1677,6 +1720,7 @@ class RecruitView(discord.ui.View):
         self.players.discard(interaction.user)
         self.spectators.discard(interaction.user)
         self.preferences.pop(interaction.user, None)
+        self.anti_preferences.pop(interaction.user, None)
         await self.update_message(interaction)
 
     @discord.ui.button(style=discord.ButtonStyle.primary, row=1, custom_id="btn_start_rec")
@@ -1691,7 +1735,8 @@ class RecruitView(discord.ui.View):
             "host": self.host, "players": list(self.players), "spectators": list(self.spectators), "inputs": {}, "dead": [], 
             "blocked_yesterday": [], "history": {}, "day": 1, "used_library": [], "last_active": time.time(),
             "lang": self.lang,
-            "prefs": {p: r for p, r in self.preferences.items() if p in self.players}
+            "prefs": {p: r for p, r in self.preferences.items() if p in self.players},
+            "anti_prefs": {p: r for p, r in self.anti_preferences.items() if p in self.players}
         }
         await interaction.message.delete()
         setup_view = RoleSetupView(host=self.host, players=list(self.players), lang=self.lang)
@@ -1722,38 +1767,69 @@ class RecruitView(discord.ui.View):
         else:
             await interaction.message.edit(embed=embed, view=self)
 
-def assign_roles_with_prefs(players, counts, prefs):
-    """役職希望を抽選の優先権として反映して役職を割り当てる。
-    prefs: {player: role_key}（具体的な希望のみ。"any"・未指定は含めない）"""
-    remaining = dict(counts)
-    assignment = {}
-    unassigned = list(players)
-    random.shuffle(unassigned)
-    # 役職ごとに希望者を抽選（希望者数 > 枠なら希望者内でランダム抽選）
-    for role in ["navigator", "passenger", "charon", "hades"]:
-        cands = [p for p in unassigned if prefs.get(p) == role]
-        random.shuffle(cands)
-        while cands and remaining.get(role, 0) > 0:
-            p = cands.pop()
-            assignment[p] = role
-            remaining[role] -= 1
-            unassigned.remove(p)
-    # 残りの枠をランダムに割り当て
-    rest_pool = []
-    for role, c in remaining.items():
-        rest_pool.extend([role] * c)
-    random.shuffle(rest_pool)
-    random.shuffle(unassigned)
-    for p, role in zip(unassigned, rest_pool):
-        assignment[p] = role
-    return assignment
+def assign_roles_with_prefs(players, counts, prefs, anti=None):
+    """役職を割り当てる。
+    prefs: {player: role}  なりたい（抽選の優先権）
+    anti:  {player: role}  なりたくない（可能な限り尊重・ハード制約）
+    方針: 「拒否を最優先」「希望は抽選優先権」「全拒否を守れない時は最大限充足」。
+    小規模なのでランダム探索を多数回行い、(拒否違反数→希望充足数) で最良解を選ぶ。"""
+    import collections
+    anti = anti or {}
+    template = []
+    for role, c in counts.items():
+        template.extend([role] * int(c))
+    players = list(players)
+    if len(template) != len(players):
+        # 念のための整合（理論上は一致するはず）
+        template = (template + ["passenger"] * len(players))[:len(players)]
+
+    def one_attempt():
+        rem = collections.Counter(template)
+        assignment = {}
+        # フェーズA: なりたい役職を抽選（ランダム順＝抽選。枠が空いていて拒否と矛盾しない人から）
+        order = list(players); random.shuffle(order)
+        for p in order:
+            w = prefs.get(p)
+            if w and w != "any" and rem.get(w, 0) > 0 and anti.get(p) != w:
+                assignment[p] = w; rem[w] -= 1
+        # フェーズB: 残りを、なりたくない役職を避けつつランダム割り当て
+        rest = [p for p in players if p not in assignment]; random.shuffle(rest)
+        for p in rest:
+            avail = [r for r in rem if rem[r] > 0]
+            ok_choices = [r for r in avail if r != anti.get(p)]
+            pick_from = ok_choices if ok_choices else avail  # 避けられない時は違反を許容
+            if not pick_from:
+                break
+            r = random.choice(pick_from)
+            assignment[p] = r; rem[r] -= 1
+        return assignment
+
+    best, best_score = None, None
+    for _ in range(300):
+        a = one_attempt()
+        if len(a) != len(players):
+            continue
+        violations = sum(1 for p in players if anti.get(p) and a.get(p) == anti.get(p))
+        wants_ok = sum(1 for p in players if prefs.get(p) and prefs.get(p) != "any" and a.get(p) == prefs.get(p))
+        score = (violations, -wants_ok)  # 違反最小 → 希望充足最大
+        if best_score is None or score < best_score:
+            best, best_score = dict(a), score
+            if violations == 0 and best_score[1] <= -min(
+                len([p for p in players if prefs.get(p) and prefs.get(p) != "any"]),
+                len(players)):
+                break  # 違反0かつ希望も十分通った
+    if best is None:  # 最終フォールバック（純ランダム）
+        pool = list(template); random.shuffle(pool)
+        best = {players[i]: pool[i] for i in range(len(players))}
+    return best
 
 
 async def distribute_roles(channel, players, counts, rules, settings, apply_prefs=False):
     game = games[channel.id]
     if apply_prefs:
         prefs = game.get("prefs", {})
-        game["roles"] = assign_roles_with_prefs(players, counts, prefs)
+        anti = game.get("anti_prefs", {})
+        game["roles"] = assign_roles_with_prefs(players, counts, prefs, anti)
     else:
         roles = []
         for role_name, count in counts.items(): roles.extend([role_name] * count)
@@ -1814,7 +1890,6 @@ async def distribute_roles(channel, players, counts, rules, settings, apply_pref
             if rules.get("s_knows_h"):
                 hades_list = [p.display_name for p, r in game["roles"].items() if r == "hades"]
                 if hades_list: role_msg += t(p_lang, "msg", "dm_siren_hades", others=', '.join(hades_list))
-            role_msg += t(p_lang, "msg", "dm_siren_note")
 
         raw_image_name = f"{role_key}_{p_lang}.jpg"
         valid_image = get_image_file(raw_image_name, p_lang)
