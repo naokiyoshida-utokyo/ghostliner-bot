@@ -59,6 +59,11 @@
       "title": "💡 Basic Strategy",
       "desc": "Playable with 5-6, but recommended for 7-13 players. More players offer deeper strategic gameplay.\n\nIn beginner playtests, attacks occurred frequently. This game is designed to have higher penalties for attacking (by Charon or Night Exile) than traditional social deduction games, to reduce player elimination. Consciously refrain from attacking and aim for a point victory.\n\nHuman faction tends to be stronger at first. If so, introduce rules to weaken Humans ('Navigators don't know each other') or strengthen Charons ('Charon and Hades know each other'). Increasing the Bridge Required Number by 1 or adjusting victory points is also effective.",
       "image": null
+    },
+    "siren": {
+      "title": "🧜 Role: Siren (Charon Faction)",
+      "image": "siren_en.jpg",
+      "desc": "※This is a Discord-only special role.\n\n**[Abilities]**\n・You secretly know who the Charons are (you do not join the Charons' secret talk).\n・You may freely choose your destination. If you go to the Bridge, you must play [O].\n・Only on a day you secretly chose the Bridge, you may overwrite one player's destination to [Bridge]+[O] (once per target; you can use it every day if you target someone new).\n・Ghost interference takes priority. If a ghost's overwrite prevents yours, the use is not consumed.\n\n━━━━━━━━━━━━━━━━━━━━━\n🧜 **Siren Strategy Guide**\n━━━━━━━━━━━━━━━━━━━━━\n**[Early & Late Game] The commander who steers the discussion**\n・You accurately know the Human and Charon factions. Use your words to sow confusion among the Humans.\n・You can forcibly drag a player heading to the Library out to the Bridge. Pull out the loud players who insist on their divination target and break the Library monopoly. Claiming \"I'll go to the Library\" and then not going—wasting a turn—is also effective.\n・Watch the Charons' words and actions. On a day a Charon goes to the Bridge, the Siren should also go to the Bridge and play [O]; on a day a Charon stays in the Lounge, the Siren should also stay in the Lounge.\n・However, using your ability narrows it down that one of the Bridge members is the Siren. Choose your moment wisely."
     }
   },
   "roles": {
@@ -66,7 +71,8 @@
     "passenger": "Passenger",
     "charon": "Charon",
     "hades": "Hades",
-    "ghost": "Ghost"
+    "ghost": "Ghost",
+    "siren": "Siren"
   },
   "dests": {
     "bridge": "Bridge",
@@ -79,7 +85,8 @@
     "navigator": "- Must go to the [Bridge] and must play [O].",
     "passenger": "- No special ability.\n- Can choose destination freely.\n- If going to the Bridge, must play [O].",
     "charon": "- Can choose destination freely.\n- If going to the Bridge, may play [X] instead of [O].\n- On the day you go to the Lounge, you may attack 1 person. Attack succeeds if target is in Bridge or Library (target eliminated). If target is in Lounge, attack fails (you are eliminated).\n- Charons cannot attack each other.",
-    "hades": "- Can choose destination freely.\n- If going to the Bridge, must play [O]."
+    "hades": "- Can choose destination freely.\n- If going to the Bridge, must play [O].",
+    "siren": "・You secretly know who the Charons are (you do not join the Charons' secret talk).\n・You may freely choose your destination. If you go to the Bridge, you must play [O].\n・Only on a day you secretly chose the Bridge, you may overwrite one player's destination to [Bridge]+[O] (once per target; you can use it every day if you target someone new).\n・Ghost interference takes priority. If a ghost's overwrite prevents yours, the use is not consumed."
   },
   "ui": {
     "back_to_summary": "Back to Summary",
@@ -123,7 +130,20 @@
     "btn_join": "Join",
     "btn_spectate": "Spectate",
     "btn_leave": "Leave",
-    "btn_close_recruit": "Close Recruitment (Host)"
+    "btn_close_recruit": "Close Recruitment (Host)",
+    "btn_join_pref": "Join: Role Preference",
+    "opt_pref_any": "No preference",
+    "select_pref": "Select preferred role",
+    "select_target_attack_siren": "Choose your attack/interference target",
+    "opt_no_attack_siren": "Attack/interfere with no one",
+    "btn_input_attack_siren": "Enter attack/interference",
+    "btn_force_attack_siren": "End input (Host)",
+    "opt_bridge_c_siren": "Bridge + one [O] (interfere here)",
+    "select_pref_want": "Role you want (up to 1)",
+    "select_pref_reject": "Role you don't want (up to 1)",
+    "opt_pref_none": "None",
+    "btn_pref_submit": "Submit preferences",
+    "btn_pref_resubmit": "Resubmit preferences"
   },
   "msg": {
     "err_host_only": "This action is for the host only!",
@@ -174,15 +194,12 @@
     "charon_phase_title": "🤫 Charon's Secret Talk",
     "charon_phase_desc": "**Non-Charons, please mute your mics and speakers.**\nHost, set the time and click 'Start Charon's Secret Talk'.",
     "attack_status_title": "🗡️ Charon's Attack",
-    "attack_status_desc": "* Even if Charons don't attack, select 'Input Attack' -> 'Do not attack'.\n* Non-Charons must also select 'Do not attack'.\n\n[Current Submissions: {current}/{total} players]\n\n* Ghosts have no attack rights and do not need to input.\n* If forced to end, non-submitters will not attack.",
+    "attack_status_desc": "・Charon can attack only when they themselves chose the Lounge.\n・Even if Charons don't attack, select 'Input Attack' -> 'Do not attack'.\n・Non-Charons must also select 'Do not attack'.\n\n[Current Submissions: {current}/{total} players]\n\n* Ghosts have no attack rights and do not need to input.\n* If forced to end, non-submitters will not attack.",
     "attack_end_title": "🗡️ Charon's Attack Ended",
     "submit_attack_none": "Submitted: 【Do not attack anyone】.",
     "submit_attack_target": "Submitted: Attack target 【{target}】.",
     "attack_prompt": "Charon, select an attack target. If not attacking, select 'Do not attack anyone'.\n* For non-Charons, attacks will not trigger regardless of the choice.",
     "ghost_prompt": "You are a Ghost.\nYou can overwrite any player's destination to the Lounge. However, you cannot block a player who was blocked the previous day.",
-    "action_prompt_navigator": "You are a 【{role}】\n- Select your destination\n\n* Going to the Bridge automatically plays 1 [O]. If there are 0 [X] this turn, the number of [O] is added to 'O pt'.\n\nCurrent Points\nO: {c_bar} ({c_pt} / {win_c} pt)\nX: {x_bar} ({x_pt} / {win_x} pt)\n\n* Cannot be changed once submitted.",
-    "action_prompt_passenger": "You are a 【{role}】\n- Select your destination\n\n* Going to the Bridge automatically plays 1 [O]. If there are 0 [X] this turn, the number of [O] is added to 'O pt'.\n\nCurrent Points\nO: {c_bar} ({c_pt} / {win_c} pt)\nX: {x_bar} ({x_pt} / {win_x} pt)\n\n* Cannot be changed once submitted.",
-    "action_prompt_charon": "You are a 【{role}】\n- Select your destination\n\n* Only Charon can play 1 [X] instead of [O] in the Bridge. Any amount of [O] is invalidated if there is at least 1 [X].\n\nCurrent Points\nO: {c_bar} ({c_pt} / {win_c} pt)\nX: {x_bar} ({x_pt} / {win_x} pt)\n\n* Cannot be changed once submitted.",
     "setup_need": "Bridge Required Number: {n} players",
     "setup_win_c": "O Victory: {n}pt",
     "setup_win_x": "X Victory: {n}pt",
@@ -209,7 +226,35 @@
     "game_start_msg": "**The game has started!**\nType `/rules` to check the rules.\nYou can change your display language with `/language`.",
     "reset_success": "The game state in this channel has been reset.",
     "cleanup_msg": "⌛ **The game was automatically ended (reset) due to no activity for 24 hours.**",
-    "shop_ad": ":hearts:  **Physical Card Edition Available!**\nIf you enjoyed the game, please check out the physical version on BOOTH!\nInternational shipping is fully supported via official forwarding services like Buyee, so you can purchase it from overseas without any issues!\n🔗 {shop_url}"
+    "shop_ad": ":hearts:  **Physical Card Edition Available!**\nIf you enjoyed the game, please check out the physical version on BOOTH!\nInternational shipping is fully supported via official forwarding services like Buyee, so you can purchase it from overseas without any issues!\n🔗 {shop_url}",
+    "rule_need": "Bridge Required: {n} players",
+    "action_prompt_common": "You are a 【{role}】\n- Select your destination\n\n* Non-Charon players going to the Bridge automatically play 1 [O].\n* Only Charon may play 1 [X] instead of [O] at the Bridge.\n* If everyone at the Bridge plays [O], that number is added to [O pt]. If even 1 [X] is mixed in, nothing is added to [O pt] and the number of [X] is added to [X pt]. If the required number of players is not met, 1 is added to [X pt].\n* Cannot be changed once submitted.\n\nCurrent Points (Bridge Required: {need} players)\nO: {c_bar} ({c_pt} / {win_c} pt)\nX: {x_bar} ({x_pt} / {win_x} pt)",
+    "line_ghost_block": "{rank} 👻{name} ({time}) → Blocking {target}",
+    "line_ghost_none": "{rank} 👻{name} ({time}) → No Block",
+    "attack_invalid_warn": "\n* Your attack will be invalid because you did not choose the Lounge.",
+    "dm_failed": "⚠️ Could not send a DM to {name}. Please check their privacy settings.",
+    "pref_prompt": "[You are already registered]\nBefore the host closes recruitment, you can choose a \"role you want\" and a \"role you don't want\" (each optional, up to 1).\n* Effective only when the host turns on \"Apply Role Preferences\".\n* Any field left blank is treated as no preference.\n* Your preference is not guaranteed.",
+    "pref_set": "Your role preference has been set to 【{role}】. You can change it any time until recruitment closes.",
+    "role_reveal_line": "{emoji} {name}: {role}{skull}",
+    "attack_prompt_siren": "Charons and Sirens, please choose your target.\nIf you will not attack/interfere, choose \"Attack/interfere with no one\".\n* A Charon's choice automatically becomes an attack; a Siren's choice automatically becomes interference.\n* For players who are neither Charon nor Siren, no attack/interference occurs no matter what you pick.",
+    "attack_status_title_siren": "🗡️ Charon's Attack / Siren's Interference",
+    "attack_end_title_siren": "🗡️ Charon's Attack / Siren's Interference has ended",
+    "submit_mermaid_none": "Submitted: [Interfere with no one].",
+    "submit_mermaid_target": "Submitted [{target}] as your interference target (lured to the Bridge).",
+    "mermaid_invalid_warn": "\n* Your interference is invalid because you did not choose the Bridge.",
+    "dm_siren_charon": "\nIdentity of Charon: {others}",
+    "dm_siren_ally": "\nFellow Sirens: {others}",
+    "dm_siren_alone": "\nFellow Sirens: You are the only one.",
+    "dm_siren_hades": "\nIdentity of Hades: {others}",
+    "dm_charon_siren": "\nIdentity of Siren: {others}",
+    "dm_hades_siren": "\nIdentity of Siren: {others}",
+    "attack_status_desc_siren": "・Charon can attack only when they themselves chose the Lounge.\n・Siren can interfere only when they themselves chose the Bridge.\n・Even if Charons/Sirens do not act, select 'Enter attack/interference' -> 'Attack/interfere with no one'.\n・Non-Charon/Siren players must also select 'Attack/interfere with no one'.\n\n[Current Submissions: {current}/{total} players]\n\n* Ghosts have no attack/interference rights and do not need to input.\n* If forced to end, non-submitters will neither attack nor interfere.",
+    "pref_status": "[Role Preferences Received]\nRole you want: {want}\nRole you don't want: {reject}\n\nPlease wait until the host closes recruitment.\nUntil then, you can change your choices any number of times with the button below.",
+    "faction_human": "[Human Faction]",
+    "faction_charon": "[Charon Faction]",
+    "setup_role_total": "Participants: {n} / Total set: {total}",
+    "setup_role_total_warn": "⚠️ The total does not match the number of participants. Adjust with +/-.",
+    "setup_role_total_ok": "✅ The total matches. Press \"Next\"."
   },
   "display": {
     "ghost_no_block": "➖No Interference",
@@ -220,8 +265,9 @@
     "dest_lounge": "🟥Lounge",
     "dest_lounge_ow": "⛔Lounge(OW)",
     "attack_self_destruct": "💀Attacked {target} & Self-destructed",
-"attack_killed": "💀Killed at {dest}",
-    "shortage": "Not Enough Players"
+    "attack_killed": "💀Killed at {dest}",
+    "shortage": "Not Enough Players",
+    "siren_dragged": "🧜Bridge (charmed by the Siren)"
   },
   "settings": {
     "rule_nav_knows": "Navigator Knows",
@@ -231,6 +277,12 @@
     "rule_chr_hds": "Charon Knows Hades",
     "rule_spec": "Spectator Reveal",
     "vic_o": "O pt target",
-    "vic_x": "X pt target"
+    "vic_x": "X pt target",
+    "rule_prefs": "Apply Role Preferences",
+    "rule_siren_knows": "Sirens Know Each Other",
+    "rule_s_knows_c": "Siren Knows Charon",
+    "rule_c_knows_s": "Charon Knows Siren",
+    "rule_h_knows_s": "Hades Knows Siren",
+    "rule_s_knows_h": "Siren Knows Hades"
   }
 }
