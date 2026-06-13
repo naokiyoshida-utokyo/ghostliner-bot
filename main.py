@@ -557,6 +557,7 @@ class ResultRevealView(discord.ui.View):
 
 async def transition_to_night_phase(channel, game):
     game["votes"] = {}
+    game["phase_voteresult_started"] = False
     game["vote_start"] = time.time()
     await update_vote_message(channel, game, is_first=True)
 
@@ -630,6 +631,9 @@ class VoteTriggerView(discord.ui.View):
             await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
             return
             
+        if not game:
+            await interaction.response.send_message(t(u_lang, "msg", "err_no_game"), ephemeral=True)
+            return
         if "votes" not in game: game["votes"] = {}
         
         alive_players = [p for p in game["players"] if p not in game.get("dead", [])]
@@ -642,9 +646,11 @@ class VoteTriggerView(discord.ui.View):
         await update_vote_message(interaction.channel, game)
         if game.get("vote_msg"): await game["vote_msg"].edit(view=None)
         
-        g_lang = get_game_lang(self.channel_id)
-        view = VoteResultRevealView(self.channel_id, game["host"])
-        await interaction.channel.send(content=t(g_lang, "msg", "vote_forced"), view=view)
+        if not game.get("phase_voteresult_started"):
+            game["phase_voteresult_started"] = True
+            g_lang = get_game_lang(self.channel_id)
+            view = VoteResultRevealView(self.channel_id, game["host"])
+            await interaction.channel.send(content=t(g_lang, "msg", "vote_forced"), view=view)
 
 class VoteInputView(discord.ui.View):
     def __init__(self, channel_id, user_lang):
@@ -692,7 +698,8 @@ class VoteInputView(discord.ui.View):
             await interaction.response.edit_message(content=t(self.user_lang, "msg", "vote_submit_target", target=tgt_name), view=None)
 
         alive_players = [p for p in game["players"] if p not in game.get("dead", [])]
-        if len(game["votes"]) == len(alive_players):
+        if len(game["votes"]) == len(alive_players) and not game.get("phase_voteresult_started"):
+            game["phase_voteresult_started"] = True
             game["vote_end_time"] = time.time()
             await update_vote_message(interaction.channel, game)
             if game.get("vote_msg"): await game["vote_msg"].edit(view=None)
@@ -878,6 +885,9 @@ class NextDayView(discord.ui.View):
         game["attacks"] = {}
         game["mermaids"] = {}
         game["votes"] = {}
+        game["phase_charon_started"] = False
+        game["phase_result_started"] = False
+        game["phase_voteresult_started"] = False
         
         game["blocked_yesterday"] = []
         for data in game.get("day_results", {}).values():
@@ -995,18 +1005,8 @@ class AttackInputView(discord.ui.View):
         await update_attack_status_message(interaction.channel, game)
 
         alive_players = [p for p in game["players"] if p not in game.get("dead", [])]
-        if len(game["attacks"]) == len(alive_players):
-            if game.get("attack_msg"): await game["attack_msg"].edit(view=None)
-            view = ResultRevealView(self.channel_id, game["host"])
-            await interaction.channel.send(view=view)
-            if my_dest != "lounge":
-                content += t(self.user_lang, "msg", "attack_invalid_warn")
-            await interaction.response.edit_message(content=content, view=None)
-
-        await update_attack_status_message(interaction.channel, game)
-
-        alive_players = [p for p in game["players"] if p not in game.get("dead", [])]
-        if len(game["attacks"]) == len(alive_players):
+        if len(game["attacks"]) == len(alive_players) and not game.get("phase_result_started"):
+            game["phase_result_started"] = True
             if game.get("attack_msg"): await game["attack_msg"].edit(view=None)
             view = ResultRevealView(self.channel_id, game["host"])
             await interaction.channel.send(view=view)
@@ -1046,6 +1046,9 @@ class TriggerAttackView(discord.ui.View):
             await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
             return
         game = games.get(self.channel_id)
+        if not game:
+            await interaction.response.send_message(t(u_lang, "msg", "err_no_game"), ephemeral=True)
+            return
         if "attacks" not in game: game["attacks"] = {}
         
         alive_players = [p for p in game["players"] if p not in game.get("dead", [])]
@@ -1056,8 +1059,10 @@ class TriggerAttackView(discord.ui.View):
         await update_attack_status_message(interaction.channel, game)
         
         if game.get("attack_msg"): await game["attack_msg"].edit(view=None)
-        view = ResultRevealView(self.channel_id, game["host"])
-        await interaction.channel.send(view=view)
+        if not game.get("phase_result_started"):
+            game["phase_result_started"] = True
+            view = ResultRevealView(self.channel_id, game["host"])
+            await interaction.channel.send(view=view)
 
 class CharonTimerActiveView(discord.ui.View):
     def __init__(self, channel_id, host):
@@ -1111,9 +1116,13 @@ class CharonTimerSetupView(discord.ui.View):
             await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
             return
         
-        await interaction.message.delete()
+        try: await interaction.message.delete()
+        except: pass
 
-        game = games[self.channel_id]
+        game = games.get(self.channel_id)
+        if not game:
+            return
+        game["phase_result_started"] = False
         game["charon_timer_active"] = True
 
         end_time = int(time.time()) + self.duration
@@ -1201,7 +1210,8 @@ class GhostInputView(discord.ui.View):
             tgt_name = t_user.display_name if t_user else 'Unknown'
             await interaction.response.edit_message(content=t(self.user_lang, "msg", "submit_ghost_target", target=tgt_name), view=None)
             
-        if len(game["inputs"]) == len(game["players"]):
+        if len(game["inputs"]) == len(game["players"]) and not game.get("phase_charon_started"):
+            game["phase_charon_started"] = True
             game["day_end_time"] = time.time()
             await update_main_message(interaction.channel, game)
             await transition_to_charon_phase(interaction.channel, game)
@@ -1278,7 +1288,8 @@ class ActionInputView(discord.ui.View):
         selected_label = self.dest_select.options[[opt.value for opt in self.dest_select.options].index(val)].label
         await interaction.response.edit_message(content=t(self.user_lang, "msg", "submit_action", dest=selected_label), view=None)
         
-        if len(game["inputs"]) == len(game["players"]):
+        if len(game["inputs"]) == len(game["players"]) and not game.get("phase_charon_started"):
+            game["phase_charon_started"] = True
             game["day_end_time"] = time.time()
             await update_main_message(interaction.channel, game)
             await transition_to_charon_phase(interaction.channel, game)
@@ -1380,6 +1391,9 @@ class TriggerInputView(discord.ui.View):
             await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
             return
         game = games.get(self.channel_id)
+        if not game:
+            await interaction.response.send_message(t(u_lang, "msg", "err_no_game"), ephemeral=True)
+            return
         for p in game["players"]:
             if p not in game["inputs"]:
                 if p in game.get("dead", []): game["inputs"][p] = {"type": "ghost", "target": "none", "rank": "Forced", "rank_num": 999, "time": "-"}
@@ -1387,7 +1401,9 @@ class TriggerInputView(discord.ui.View):
         game["day_end_time"] = time.time()
         await interaction.response.defer()
         await update_main_message(interaction.channel, game)
-        await transition_to_charon_phase(interaction.channel, game)
+        if not game.get("phase_charon_started"):
+            game["phase_charon_started"] = True
+            await transition_to_charon_phase(interaction.channel, game)
 
 class GameSetupView(discord.ui.View):
     def __init__(self, host, players, counts, rules, lang, apply_prefs=False):
@@ -2078,10 +2094,9 @@ async def reset(interaction: discord.Interaction):
     if interaction.channel_id in games:
         game = games[interaction.channel_id]
         is_host = (interaction.user == game.get("host"))
-        is_player = "players" in game and interaction.user in game["players"]
         is_admin = getattr(interaction.user.guild_permissions, "manage_channels", False)
         
-        if is_host or is_player or is_admin:
+        if is_host or is_admin:
             del games[interaction.channel_id]
             await interaction.response.send_message(t(lang, "msg", "reset_success"))
         else:
