@@ -509,7 +509,11 @@ class ResultRevealView(discord.ui.View):
         detail_text = ""
         for idx, p in enumerate(game["players"]):
             emoji = get_player_number_emoji(idx, total_players)
-            detail_text += f"{emoji} {p.display_name}│{results[p]['display']}\n"
+            disp_name = p.display_name
+            if g_lang == "ja":
+                disp_name = disp_name[:6]
+                disp_name = disp_name + "　" * (6 - len(disp_name))
+            detail_text += f"{emoji} {disp_name}│{results[p]['display']}\n"
         detail_text += f"〇✕│{c_count_text}\n"
         detail_text += f" PT│{pt_text}\n"
         embed.add_field(name=t(g_lang, "msg", "field_action_detail"), value=detail_text, inline=False)
@@ -1635,7 +1639,7 @@ class RoleSetupView(discord.ui.View):
         await interaction.channel.send(embed=embed, view=rule_view)
 
 class PrefRoleView(discord.ui.View):
-    """役職希望を選ぶephemeralビュー（なりたい/なりたくない 各1つ・締切まで変更可）"""
+    """役職希望の選択画面（なりたい/なりたくない 各最大1つ ＋ 提出ボタン）"""
     def __init__(self, recruit_view, user):
         super().__init__(timeout=300)
         self.rv = recruit_view
@@ -1643,25 +1647,25 @@ class PrefRoleView(discord.ui.View):
         lang = USER_LANGS.get(user.id, recruit_view.lang)
         self.lang = lang
 
+        cur_want = self.rv.preferences.get(user, "any")
+        cur_reject = self.rv.anti_preferences.get(user, "none")
         role_vals = ["navigator", "passenger", "charon", "hades", "siren"]
-        want_opts = [discord.SelectOption(label=t(lang, "roles", r), value=r) for r in role_vals]
-        want_opts.append(discord.SelectOption(label=t(lang, "ui", "opt_pref_any"), value="any"))
+
+        want_opts = [discord.SelectOption(label=t(lang, "roles", r), value=r, default=(r == cur_want)) for r in role_vals]
+        want_opts.append(discord.SelectOption(label=t(lang, "ui", "opt_pref_any"), value="any", default=(cur_want == "any")))
         self.want_select = discord.ui.Select(placeholder=t(lang, "ui", "select_pref_want"), options=want_opts, row=0)
         self.want_select.callback = self.on_want
         self.add_item(self.want_select)
 
-        reject_opts = [discord.SelectOption(label=t(lang, "roles", r), value=r) for r in role_vals]
-        reject_opts.append(discord.SelectOption(label=t(lang, "ui", "opt_pref_none"), value="none"))
+        reject_opts = [discord.SelectOption(label=t(lang, "roles", r), value=r, default=(r == cur_reject)) for r in role_vals]
+        reject_opts.append(discord.SelectOption(label=t(lang, "ui", "opt_pref_none"), value="none", default=(cur_reject == "none")))
         self.reject_select = discord.ui.Select(placeholder=t(lang, "ui", "select_pref_reject"), options=reject_opts, row=1)
         self.reject_select.callback = self.on_reject
         self.add_item(self.reject_select)
 
-    def _status(self):
-        want = self.rv.preferences.get(self.user)
-        reject = self.rv.anti_preferences.get(self.user)
-        want_label = t(self.lang, "roles", want) if want else t(self.lang, "ui", "opt_pref_any")
-        reject_label = t(self.lang, "roles", reject) if reject else t(self.lang, "ui", "opt_pref_none")
-        return t(self.lang, "msg", "pref_status", want=want_label, reject=reject_label)
+        submit = discord.ui.Button(label=t(lang, "ui", "btn_pref_submit"), style=discord.ButtonStyle.success, row=2)
+        submit.callback = self.on_submit
+        self.add_item(submit)
 
     async def on_want(self, interaction: discord.Interaction):
         val = interaction.data["values"][0]
@@ -1672,7 +1676,7 @@ class PrefRoleView(discord.ui.View):
             # 後勝ち: なりたくないに同じ役職があれば解除
             if self.rv.anti_preferences.get(self.user) == val:
                 self.rv.anti_preferences.pop(self.user, None)
-        await interaction.response.edit_message(content=self._status(), view=self)
+        await interaction.response.edit_message(view=PrefRoleView(self.rv, self.user))
 
     async def on_reject(self, interaction: discord.Interaction):
         val = interaction.data["values"][0]
@@ -1683,7 +1687,33 @@ class PrefRoleView(discord.ui.View):
             # 後勝ち: なりたいに同じ役職があれば解除
             if self.rv.preferences.get(self.user) == val:
                 self.rv.preferences.pop(self.user, None)
-        await interaction.response.edit_message(content=self._status(), view=self)
+        await interaction.response.edit_message(view=PrefRoleView(self.rv, self.user))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        want = self.rv.preferences.get(self.user)
+        reject = self.rv.anti_preferences.get(self.user)
+        want_label = t(self.lang, "roles", want) if want else t(self.lang, "ui", "opt_pref_any")
+        reject_label = t(self.lang, "roles", reject) if reject else t(self.lang, "ui", "opt_pref_none")
+        content = t(self.lang, "msg", "pref_status", want=want_label, reject=reject_label)
+        await interaction.response.edit_message(content=content, view=PrefConfirmView(self.rv, self.user))
+
+
+class PrefConfirmView(discord.ui.View):
+    """希望提出後の確認画面（再提出で選択画面に戻る）"""
+    def __init__(self, recruit_view, user):
+        super().__init__(timeout=300)
+        self.rv = recruit_view
+        self.user = user
+        lang = USER_LANGS.get(user.id, recruit_view.lang)
+        self.lang = lang
+        btn = discord.ui.Button(label=t(lang, "ui", "btn_pref_resubmit"), style=discord.ButtonStyle.secondary)
+        btn.callback = self.on_resubmit
+        self.add_item(btn)
+
+    async def on_resubmit(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(
+            content=t(self.lang, "msg", "pref_prompt"),
+            view=PrefRoleView(self.rv, self.user))
 
 
 class RecruitView(discord.ui.View):
@@ -1979,8 +2009,7 @@ async def distribute_roles(channel, players, counts, rules, settings, apply_pref
     
     rule_str = "\n".join(rule_texts)
     
-    order = ["navigator", "passenger", "charon", "hades"]
-    if counts.get("siren", 0) > 0: order.append("siren")
+    order = ["navigator", "passenger", "charon", "hades", "siren"]
     breakdown_str = " / ".join([f"{t(g_lang, 'roles', r)}: {counts.get(r, 0)}" for r in order])
     
     win_c = settings['win_c']
