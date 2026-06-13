@@ -225,7 +225,7 @@ class RulesView(discord.ui.View):
             discord.SelectOption(label=t(lang, "rules", "passenger", "title"), value="passenger", emoji="🧑‍💼"),
             discord.SelectOption(label=t(lang, "rules", "charon", "title"), value="charon", emoji="💀"),
             discord.SelectOption(label=t(lang, "rules", "hades", "title"), value="hades", emoji="👑"),
-            discord.SelectOption(label=t(lang, "rules", "siren", "title"), value="siren", emoji="🎶"),
+            discord.SelectOption(label=t(lang, "rules", "siren", "title"), value="siren", emoji="🧜"),
             discord.SelectOption(label=t(lang, "rules", "ghost", "title"), value="ghost", emoji="👻")
         ]
         self.role_select = discord.ui.Select(placeholder=t(lang, "ui", "select_role_rule"), options=role_options, custom_id="rule_role")
@@ -435,10 +435,10 @@ class ResultRevealView(discord.ui.View):
                     data["display"] = t(g_lang, "display", "dest_lounge_ow")
                     data["history_emoji"] = "⛔"
 
-        # セイレーンに呼び寄せられた人は🎶で明示（攻撃で死亡すれば後段の💀で上書きされる）
+        # セイレーンに呼び寄せられた人は🧜で明示（攻撃で死亡すれば後段の💀で上書きされる）
         for target_user in sirened_today:
             results[target_user]["display"] = t(g_lang, "display", "siren_dragged")
-            results[target_user]["history_emoji"] = "🎶"
+            results[target_user]["history_emoji"] = "🧜"
 
         new_dead = []
         for p_charon, target_id in game.get("attacks", {}).items():
@@ -748,12 +748,7 @@ class VoteResultRevealView(discord.ui.View):
         await interaction.channel.send(embed=exile_embed)
         await asyncio.sleep(1)
 
-        tension_msg = await interaction.channel.send(t(g_lang, "msg", "tension_1"))
-        await asyncio.sleep(2)
-        await tension_msg.edit(content=t(g_lang, "msg", "tension_2"))
-        await asyncio.sleep(2)
-        await tension_msg.delete()
-
+        # 勝敗を先に確定（送信副作用なし。勝利画像の出し分けに使う）
         new_alive_players = [p for p in game["players"] if p not in game["dead"]]
         alive_charons = sum(1 for p in new_alive_players if game["roles"][p] == "charon")
 
@@ -761,30 +756,53 @@ class VoteResultRevealView(discord.ui.View):
         reason_msg = ""
         game_over = False
         embed_color = 0x808080
+        winner = None  # "human" / "charon"
 
         if alive_charons == 0:
             win_msg = t(g_lang, "msg", "win_human")
             reason_msg = t(g_lang, "msg", "win_reason_charon_dead")
             game_over = True
             embed_color = 0x00BFFF
+            winner = "human"
         elif alive_charons * 2 >= len(new_alive_players):
             win_msg = t(g_lang, "msg", "win_charon")
             reason_msg = t(g_lang, "msg", "win_reason_charon_half")
             game_over = True
             embed_color = 0xDC143C
+            winner = "charon"
         else:
             if game["pt"]["c"] >= game["settings"]["win_c"]:
                 win_msg = t(g_lang, "msg", "win_human")
                 reason_msg = t(g_lang, "msg", "win_reason_c_pt", pt=game['settings']['win_c'])
                 game_over = True
                 embed_color = 0x00BFFF
+                winner = "human"
             elif game["pt"]["x"] >= game["settings"]["win_x"]:
                 win_msg = t(g_lang, "msg", "win_charon")
                 reason_msg = t(g_lang, "msg", "win_reason_x_pt", pt=game['settings']['win_x'])
                 game_over = True
                 embed_color = 0xDC143C
+                winner = "charon"
             else:
                 win_msg = t(g_lang, "msg", "win_not_yet")
+
+        # 演出：「幽霊客船の運命は……／行きつく先は、生か死か……？」
+        tension_msg = await interaction.channel.send(t(g_lang, "msg", "tension_1"))
+        await asyncio.sleep(2)
+        await tension_msg.edit(content=t(g_lang, "msg", "tension_2"))
+        await asyncio.sleep(2)
+        await tension_msg.delete()
+
+        # ゲーム終了時は、結果embedの前に勝利画像をバーンと表示
+        if game_over and winner:
+            victory_img = f"victory_{winner}.jpg"
+            if os.path.exists(victory_img):
+                try:
+                    await interaction.channel.send(file=discord.File(victory_img, filename=victory_img))
+                    await asyncio.sleep(1)
+                except Exception:
+                    pass
+
 
         c_bar = make_progress_bar(game['pt']['c'], game['settings']['win_c'])
         x_bar = make_progress_bar(game['pt']['x'], game['settings']['win_x'])
