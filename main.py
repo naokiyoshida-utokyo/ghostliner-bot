@@ -395,6 +395,7 @@ class ResultRevealView(discord.ui.View):
             if game["inputs"].get(siren_p, {}).get("dest") != "bridge": continue
             target_user = discord.utils.get(game["players"], id=int(m_target))
             if not target_user or target_user in game["dead"]: continue
+            if target_user == siren_p: continue                     # 自分自身は不可
             if target_user.id in game["sirened"]: continue          # 対象1人1回
             if target_user in sirened_today: continue               # 同ターン重複不可
             # 亡霊の上書きが優先：その対象が亡霊に上書きされていたら発動せず、回数も消費しない
@@ -933,6 +934,8 @@ class AttackInputView(discord.ui.View):
             if p not in game.get("dead", []):
                 if game["roles"].get(user) == "charon" and game["roles"].get(p) == "charon":
                     continue
+                if game["roles"].get(user) == "siren" and p == user:
+                    continue  # セイレーンは自分自身を妨害対象にできない
                 options.append(discord.SelectOption(label=p.display_name, value=str(p.id)))
                 
         if len(options) == 1:
