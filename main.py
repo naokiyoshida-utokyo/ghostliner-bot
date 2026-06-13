@@ -1654,14 +1654,15 @@ class PrefRoleView(discord.ui.View):
         cur_reject = self.rv.anti_preferences.get(user, "none")
         role_vals = ["navigator", "passenger", "charon", "hades", "siren"]
 
+        # 未選択（any/none）のときは default を付けず、プレースホルダー（項目名）を表示させる
         want_opts = [discord.SelectOption(label=t(lang, "roles", r), value=r, default=(r == cur_want)) for r in role_vals]
-        want_opts.append(discord.SelectOption(label=t(lang, "ui", "opt_pref_any"), value="any", default=(cur_want == "any")))
+        want_opts.append(discord.SelectOption(label=t(lang, "ui", "opt_pref_any"), value="any", default=False))
         self.want_select = discord.ui.Select(placeholder=t(lang, "ui", "select_pref_want"), options=want_opts, row=0)
         self.want_select.callback = self.on_want
         self.add_item(self.want_select)
 
         reject_opts = [discord.SelectOption(label=t(lang, "roles", r), value=r, default=(r == cur_reject)) for r in role_vals]
-        reject_opts.append(discord.SelectOption(label=t(lang, "ui", "opt_pref_none"), value="none", default=(cur_reject == "none")))
+        reject_opts.append(discord.SelectOption(label=t(lang, "ui", "opt_pref_none"), value="none", default=False))
         self.reject_select = discord.ui.Select(placeholder=t(lang, "ui", "select_pref_reject"), options=reject_opts, row=1)
         self.reject_select.callback = self.on_reject
         self.add_item(self.reject_select)
