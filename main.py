@@ -391,11 +391,13 @@ class ResultRevealView(discord.ui.View):
             if m_target == "none": continue
             if game["roles"].get(siren_p) != "siren": continue
             if siren_p in game["dead"]: continue
-            # セイレーン自身が操舵室を伏せたときのみ発動
-            if game["inputs"].get(siren_p, {}).get("dest") != "bridge": continue
+            # セイレーン自身の「最終的な行先」が操舵室のときのみ発動
+            # （亡霊に談話室へ上書きされていれば results は lounge_overwrite になり発動しない）
+            if results[siren_p]["dest"] != "bridge": continue
             target_user = discord.utils.get(game["players"], id=int(m_target))
             if not target_user or target_user in game["dead"]: continue
             if target_user == siren_p: continue                     # 自分自身は不可
+            if game["roles"].get(target_user) == "siren": continue  # セイレーン同士は呼び寄せ不可
             if target_user.id in game["sirened"]: continue          # 対象1人1回
             if target_user in sirened_today: continue               # 同ターン重複不可
             # 亡霊の上書きが優先：その対象が亡霊に上書きされていたら発動せず、回数も消費しない
@@ -444,8 +446,11 @@ class ResultRevealView(discord.ui.View):
         new_dead = []
         for p_charon, target_id in game.get("attacks", {}).items():
             if target_id != "none" and game["roles"][p_charon] == "charon" and p_charon not in game["dead"] and p_charon not in new_dead:
-                charon_original_dest = game["inputs"].get(p_charon, {}).get("dest", "")
-                if charon_original_dest == "lounge":
+                # 攻撃可否は「最終的な行先」で判定する。
+                # ・セイレーンに操舵室へ呼び寄せられたカロンは談話室にいないので攻撃は発生しない（#3）
+                # ・亡霊に談話室へ上書きされたカロンは談話室にいる扱いになり攻撃できる（#5, lounge_overwrite）
+                charon_final_dest = results[p_charon]["dest"]
+                if charon_final_dest in ("lounge", "lounge_overwrite"):
                     t_user = discord.utils.get(game["players"], id=int(target_id))
                     if t_user and t_user not in game["dead"] and t_user not in new_dead:
                         t_dest = results[t_user]["dest"]
@@ -944,8 +949,8 @@ class AttackInputView(discord.ui.View):
             if p not in game.get("dead", []):
                 if game["roles"].get(user) == "charon" and game["roles"].get(p) == "charon":
                     continue
-                if game["roles"].get(user) == "siren" and p == user:
-                    continue  # セイレーンは自分自身を妨害対象にできない
+                if game["roles"].get(user) == "siren" and game["roles"].get(p) == "siren":
+                    continue  # セイレーンはセイレーン(自分含む)を妨害対象にできない
                 options.append(discord.SelectOption(label=p.display_name, value=str(p.id)))
                 
         if len(options) == 1:
@@ -973,7 +978,6 @@ class AttackInputView(discord.ui.View):
         target_id = self.target_select.values[0]
         role = game["roles"][interaction.user]
         is_alive = interaction.user not in game.get("dead", [])
-        my_dest = game["inputs"].get(interaction.user, {}).get("dest", "")
 
         if role == "charon" and is_alive:
             game["attacks"][interaction.user] = target_id
@@ -983,8 +987,6 @@ class AttackInputView(discord.ui.View):
                 t_user = discord.utils.get(game["players"], id=int(target_id))
                 tgt_name = t_user.display_name if t_user else 'Unknown'
                 content = t(self.user_lang, "msg", "submit_attack_target", target=tgt_name)
-                if my_dest != "lounge":
-                    content += t(self.user_lang, "msg", "attack_invalid_warn")
                 await interaction.response.edit_message(content=content, view=None)
         elif role == "siren" and is_alive:
             game["attacks"][interaction.user] = "none"   # 入力完了数のカウント用
@@ -995,8 +997,6 @@ class AttackInputView(discord.ui.View):
                 t_user = discord.utils.get(game["players"], id=int(target_id))
                 tgt_name = t_user.display_name if t_user else 'Unknown'
                 content = t(self.user_lang, "msg", "submit_mermaid_target", target=tgt_name)
-                if my_dest != "bridge":
-                    content += t(self.user_lang, "msg", "mermaid_invalid_warn")
                 await interaction.response.edit_message(content=content, view=None)
         else:
             game["attacks"][interaction.user] = "none"
