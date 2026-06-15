@@ -461,7 +461,10 @@ class ResultRevealView(discord.ui.View):
                             new_dead.append(p_charon)
                         else:
                             base_dest = t(g_lang, "dests", t_dest)
-                            results[t_user]["display"] = t(g_lang, "display", "attack_killed", dest=base_dest)
+                            if t_user in sirened_today:
+                                results[t_user]["display"] = t(g_lang, "display", "attack_killed_siren", dest=base_dest)
+                            else:
+                                results[t_user]["display"] = t(g_lang, "display", "attack_killed", dest=base_dest)
                             results[t_user]["history_emoji"] = "💀"
                             new_dead.append(t_user)
 
