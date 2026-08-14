@@ -143,7 +143,9 @@
     "select_pref_reject": "不想要的职业(最多1个)",
     "opt_pref_none": "无",
     "btn_pref_submit": "提交希望",
-    "btn_pref_resubmit": "重新提交希望"
+    "btn_pref_resubmit": "重新提交希望",
+    "btn_add_ai": "添加AI (房主)",
+    "btn_remove_ai": "移除AI (房主)"
   },
   "msg": {
     "err_host_only": "此操作仅限房主使用！",
@@ -198,6 +200,15 @@
     "attack_end_title": "🗡️ 卡戎的攻击已结束",
     "submit_attack_none": "已提交【不攻击任何人】。",
     "submit_attack_target": "已提交将【{target}】作为攻击对象。",
+    "dm_ai_charon_header": "🤫 **Day {day}・卡戎的密谈**\n以下是AI卡戎今天的行动预定。\n",
+    "dm_ai_charon_bridge_c": "・**{name}**：前往驾驶室，打出［〇］。",
+    "dm_ai_charon_bridge_x": "・**{name}**：前往驾驶室，打出［✕］。",
+    "dm_ai_charon_library": "・**{name}**：前往图书室。",
+    "dm_ai_charon_attack": "・**{name}**：前往休息室，攻击【{target}】。",
+    "dm_ai_charon_no_attack": "・**{name}**：前往休息室，但不攻击任何人。",
+    "dm_ai_charon_footer": "\n我们AI无法听懂您的话语。既然无法回应您，那就把预定毫无保留地告诉您。接下来就交给您判断了。让我们配合默契，一起取胜。",
+    "submit_attack_cond_note": "这仅在您的行动地点为休息室时（您自己选择了休息室，或被亡灵将行动地点覆盖为休息室）才会产生效果。",
+    "submit_no_effect_note": "但您未满足攻击·妨害的条件，因此不会产生效果。",
     "attack_prompt": "请卡戎选择攻击对象。若不攻击，请选择“不攻击任何人”。\n※卡戎以外的玩家，无论选择哪个选项都不会发生攻击。",
     "ghost_prompt": "你是亡灵。\n你可以将任意玩家的去向覆盖为休息室。但是，你无法妨碍昨天已经被妨碍过的玩家。",
     "setup_need": "驾驶室需要人数: {n}人",
@@ -241,7 +252,6 @@
     "attack_end_title_siren": "🗡️ 卡戎的攻击·塞壬的妨害已结束",
     "submit_mermaid_none": "已提交【不妨害任何人】。",
     "submit_mermaid_target": "已将【{target}】提交为妨害(诱导至驾驶室)对象。",
-    "mermaid_invalid_warn": "\n※由于您未选择驾驶室，妨害无效",
     "dm_siren_charon": "\n卡戎的真面目: {others}",
     "dm_siren_ally": "\n同伴塞壬: {others}",
     "dm_siren_alone": "\n同伴塞壬: 只有你1人。",
@@ -254,7 +264,11 @@
     "faction_charon": "【卡戎阵营】",
     "setup_role_total": "参加人数: {n}人 ／ 设定合计: {total}人",
     "setup_role_total_warn": "⚠️ 合计与参加人数不一致。请用＋／－调整。",
-    "setup_role_total_ok": "✅ 合计一致。请按「下一步」。"
+    "setup_role_total_ok": "✅ 合计一致。请按「下一步」。",
+    "err_ai_limit": "有AI参与时最多支持{max}人。（当前{total}人）\n请移除AI，或减少参加人数。",
+    "err_ai_max_players": "有AI参与时最多支持{max}人。（当前{n}人）\n请移除AI，或减少参加人数。",
+    "err_ai_role_unsupported": "包含【{roles}】的配置下，AI无法参与。\n请改为{siren}，或使用 /reset 重新招募且不添加AI。",
+    "err_ai_too_complex": "该职业配置对AI来说过于复杂，无法进行推理。（组合{load}种／上限{limit}种）\n请减少卡戎、塞壬等有多人的职业，或减少AI的数量。"
   },
   "display": {
     "ghost_no_block": "➖不妨碍",
@@ -267,7 +281,8 @@
     "attack_self_destruct": "💀攻击{target}并自爆",
     "attack_killed": "💀死于{dest}",
     "shortage": "人数不足",
-    "siren_dragged": "🧜驾驶室(被塞壬魅惑)"
+    "siren_dragged": "🧜驾驶室(被塞壬魅惑)",
+    "attack_killed_siren": "💀死于{dest}（魅惑）"
   },
   "settings": {
     "rule_nav_knows": "领航员互相确认",

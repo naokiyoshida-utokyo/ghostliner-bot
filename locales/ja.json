@@ -143,7 +143,9 @@
     "select_pref_reject": "なりたくない役職（最大1つ）",
     "opt_pref_none": "特になし",
     "btn_pref_submit": "希望を提出する",
-    "btn_pref_resubmit": "希望を再提出する"
+    "btn_pref_resubmit": "希望を再提出する",
+    "btn_add_ai": "AIを追加(ホスト)",
+    "btn_remove_ai": "AIを外す(ホスト)"
   },
   "msg": {
     "err_host_only": "この操作はホスト専用です！",
@@ -198,6 +200,15 @@
     "attack_end_title": "🗡️ カロンの攻撃が終了",
     "submit_attack_none": "【誰も攻撃しない】で提出しました。",
     "submit_attack_target": "【{target}】を攻撃対象として提出しました。",
+    "dm_ai_charon_header": "🤫 **Day {day}・カロンの密談**\nAIのカロンから、今日の予定が届きました。\n",
+    "dm_ai_charon_bridge_c": "・**{name}**：操舵室へ行き、［〇］を出します。",
+    "dm_ai_charon_bridge_x": "・**{name}**：操舵室へ行き、［✕］を出します。",
+    "dm_ai_charon_library": "・**{name}**：図書室へ行きます。",
+    "dm_ai_charon_attack": "・**{name}**：談話室へ行き、【{target}】を攻撃します。",
+    "dm_ai_charon_no_attack": "・**{name}**：談話室へ行きますが、誰も攻撃しません。",
+    "dm_ai_charon_footer": "\nわたしたちAIは、あなたの言葉を聞き取ることができません。返事ができない代わりに、予定は包み隠さずお伝えします。あとはあなたの判断にお任せします。息を合わせて、一緒に勝ちましょう。",
+    "submit_attack_cond_note": "これは、あなたの行先が談話室だった（自身で談話室を選択した、または、亡霊によって行先を談話室へと上書きされた）ときのみ効力を生じます。",
+    "submit_no_effect_note": "しかし、あなたは攻撃・妨害の条件を満たしていないので、効力は発生しません。",
     "attack_prompt": "カロンは攻撃対象を選択してください。攻撃しない場合は「誰も攻撃しない」を選択してください。\n※カロン以外のプレイヤーは、どの選択肢を選んでも攻撃は発生しません。",
     "ghost_prompt": "あなたは亡霊です。\n任意のプレイヤーの行先を談話室で上書きすることが可能です。ただし、前日に妨害されたプレイヤーを妨害することはできません。",
     "setup_need": "操舵室の必要人数: {n}人",
@@ -241,7 +252,6 @@
     "attack_end_title_siren": "🗡️ カロンの攻撃・セイレーンの妨害が終了",
     "submit_mermaid_none": "【誰も妨害しない】で提出しました。",
     "submit_mermaid_target": "【{target}】を妨害（操舵室へ誘導）対象として提出しました。",
-    "mermaid_invalid_warn": "\n※あなたは操舵室を選んでいないため妨害は無効です",
     "dm_siren_charon": "\nカロンの正体: {others}",
     "dm_siren_ally": "\n仲間のセイレーン: {others}",
     "dm_siren_alone": "\n仲間のセイレーン: あなた1人だけです。",
@@ -254,7 +264,11 @@
     "faction_charon": "【カロン陣営】",
     "setup_role_total": "参加人数: {n}人 ／ 設定合計: {total}人",
     "setup_role_total_warn": "⚠️ 合計が参加人数と一致していません。＋／－で調整してください。",
-    "setup_role_total_ok": "✅ 合計が一致しています。「次へ」を押してください。"
+    "setup_role_total_ok": "✅ 合計が一致しています。「次へ」を押してください。",
+    "err_ai_limit": "AIが参加できるのは合計{max}人までです。（現在{total}人）\nAIを外すか、参加人数を減らしてください。",
+    "err_ai_max_players": "AIが参加できるのは最大{max}人までです。（現在{n}人）\nAIを外すか、参加人数を減らしてください。",
+    "err_ai_role_unsupported": "【{roles}】が入っている構成では、AIは参加できません。\n{siren}に置き換えるか、/reset でやり直してAIを入れずに募集してください。",
+    "err_ai_too_complex": "この役職構成は、AIには複雑すぎて推理できません。（組み合わせ{load}通り／上限{limit}通り）\nカロンやセイレーンなど、同じ役職が複数いる枠を減らすか、AIの数を減らしてください。"
   },
   "display": {
     "ghost_no_block": "➖妨害なし",
