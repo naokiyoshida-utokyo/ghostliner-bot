@@ -10,7 +10,15 @@ import glob
 import sqlite3
 import logging
 import traceback
+import unicodedata
 from dotenv import load_dotenv
+
+# AIプレイヤー関連。
+#   ai_player : Discordのメンバーのふりをする偽物クラス（AIの「体」）
+#   engine    : AIの推理エンジン。ここでは対応人数の確認にだけ使う
+import ai_player
+import ai_brain
+import engine
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 📝 ロギング（監視カメラ）の設定
@@ -147,13 +155,29 @@ load_user_langs()
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 基礎関数群
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ★ハデスとセイレーンについて
+#   ハデスは廃止し、上位互換のセイレーンに置き換える方針。
+#   ただしハデス自体は動くまま残してあるので、役職設定画面で＋を押せば
+#   今まで通り遊べる。ここで変えているのは「初期値」だけ。
+#
+#   8人以上の初期値を hades → siren にしたのは、AIプレイヤーの推理エンジン
+#   （engine.py の COMPOSITIONS）がセイレーン構成しか持っていないため。
+#   ここが食い違っていると、AIを入れたゲームで毎回ホストが手動で
+#   ハデス－／セイレーン＋を押す羽目になる。
+#
+#   5人・6人はまだハデスのままにしてある（engine.py が7〜9人しか
+#   対応していないので、どのみちAIは参加できない人数のため）。
 def get_default_role_counts(n):
     if n <= 4: return {"navigator": 0, "passenger": max(0, n-1), "charon": 1, "hades": 0, "siren": 0}
-    if n == 5: return {"navigator": 1, "passenger": 2, "charon": 1, "hades": 1, "siren": 0}
-    if n == 6: return {"navigator": 1, "passenger": 3, "charon": 1, "hades": 1, "siren": 0}
+    # ★5人・6人の初期値は、以前はハデス1だった。ハデスは廃止してセイレーンに
+    #   置き換えた役職なうえ、AI（engine.py）はハデスを知らないので、
+    #   初期値のままではAI入りで始められなかった。8人・9人と同じ方針に揃える。
+    #   （ハデス自体はボタンで足せば今まで通り遊べる）
+    if n == 5: return {"navigator": 1, "passenger": 2, "charon": 1, "hades": 0, "siren": 1}
+    if n == 6: return {"navigator": 1, "passenger": 3, "charon": 1, "hades": 0, "siren": 1}
     if n == 7: return {"navigator": 2, "passenger": 3, "charon": 2, "hades": 0, "siren": 0}
-    if n == 8: return {"navigator": 2, "passenger": 3, "charon": 2, "hades": 1, "siren": 0}
-    return {"navigator": 2, "passenger": max(4, n - 5), "charon": 2, "hades": 1, "siren": 0}
+    if n == 8: return {"navigator": 2, "passenger": 3, "charon": 2, "hades": 0, "siren": 1}
+    return {"navigator": 2, "passenger": max(4, n - 5), "charon": 2, "hades": 0, "siren": 1}
 
 def has_siren(game):
     return any(r == "siren" for r in game.get("roles", {}).values())
@@ -175,6 +199,41 @@ def get_player_number_emoji(idx, total_players):
         return f"{emojis[num // 10]}{emojis[num % 10]}"
     else:
         return emojis[num]
+
+def pad_display_name(name, width=6):
+    """
+    昼の行動結果の表で、名前の幅をそろえる。
+
+    ★「文字数」ではなく「表示幅」で数えるのが要点。
+      ひらがな・漢字・全角記号は半角2つぶんの幅を持つので、
+      len() で数えると見た目の幅と合わない。
+
+      例：「つばき（AI）」
+        文字数は7だが、（ は全角・A と I は半角なので
+        表示幅は 2+2+2 + 2+1+1+2 = 12（＝全角6文字ぶん）でちょうどよい。
+        ところが文字数で6に切り詰めると最後の ） が落ちて幅10になり、
+        表がずれる。これがAI名だけずれて見えた原因。
+
+      例：「Takumi」
+        文字数は6なので余白が足されないが、表示幅は6しかない。
+        つまりアルファベットの名前は以前からずれていた。
+
+    width : 全角何文字ぶんの幅にそろえるか
+    """
+    target = width * 2          # 半角いくつぶんか
+    out = []
+    used = 0
+    for ch in name:
+        # East Asian Width が F(全角)/W(広)/A(曖昧) の文字は半角2つぶん
+        ch_w = 2 if unicodedata.east_asian_width(ch) in ("F", "W", "A") else 1
+        if used + ch_w > target:
+            break                # これ以上入れると溢れるので、ここで打ち切る
+        out.append(ch)
+        used += ch_w
+    rest = target - used
+    # 全角スペースで埋め、1つぶん余ったら半角スペースで調整する
+    return "".join(out) + "　" * (rest // 2) + (" " if rest % 2 else "")
+
 
 def get_mentions(game):
     return " ".join([p.mention for p in game["players"]])
@@ -444,6 +503,7 @@ class ResultRevealView(discord.ui.View):
             results[target_user]["history_emoji"] = "🧜"
 
         new_dead = []
+        attack_targets = []   # AIの推理用：その日、攻撃の標的にされた人（公開情報）
         for p_charon, target_id in game.get("attacks", {}).items():
             if target_id != "none" and game["roles"][p_charon] == "charon" and p_charon not in game["dead"] and p_charon not in new_dead:
                 # 攻撃可否は「最終的な行先」で判定する。
@@ -453,6 +513,7 @@ class ResultRevealView(discord.ui.View):
                 if charon_final_dest in ("lounge", "lounge_overwrite"):
                     t_user = discord.utils.get(game["players"], id=int(target_id))
                     if t_user and t_user not in game["dead"] and t_user not in new_dead:
+                        attack_targets.append(t_user)
                         t_dest = results[t_user]["dest"]
                         if t_dest in ["lounge", "lounge_overwrite"]:
                             tgt_name = t_user.display_name[:2]
@@ -510,6 +571,19 @@ class ResultRevealView(discord.ui.View):
             "shortage": shortage
         }
 
+        # ---- AIの信念状態を、今日の公開情報で更新する ----
+        # ★これがAIの「学習」。ここが無いとAIは初日のまま何も学ばない。
+        #   AIが1人もいなければ record_day_results は何もしない。
+        if game.get("ai_state"):
+            try:
+                ai_brain.record_day_results(
+                    game, results, c_count, x_count,
+                    charmed=sirened_today, newly_dead=new_dead,
+                    attack_targets=attack_targets,
+                )
+            except Exception:
+                logger.error(f"❌ AIの信念状態の更新に失敗: {traceback.format_exc()}")
+
         embed = discord.Embed(title=t(g_lang, "msg", "day_result_title", day=day_num), color=0xE6C229)
         embed.description = t(g_lang, "msg", "day_result_desc")
         
@@ -520,8 +594,7 @@ class ResultRevealView(discord.ui.View):
             emoji = get_player_number_emoji(idx, total_players)
             disp_name = p.display_name
             if g_lang == "ja":
-                disp_name = disp_name[:6]
-                disp_name = disp_name + "　" * (6 - len(disp_name))
+                disp_name = pad_display_name(disp_name, 6)
             detail_text += f"{emoji} {disp_name}│{results[p]['display']}\n"
         detail_text += f"〇✕│{c_count_text}\n"
         detail_text += f" PT│{pt_text}\n"
@@ -563,11 +636,44 @@ class ResultRevealView(discord.ui.View):
         lib_view = LibraryAndNextView(self.channel_id, self.host, valid_library_user)
         await interaction.channel.send(content=get_mentions(game), embed=embed, view=lib_view)
 
+        # ---- 図書室に入れたのがAIなら、その場で役職を確認させる ----
+        # ★人間の場合はボタンを押して自分だけに結果が表示される。
+        #   AIは押せないので、ここで代わりに済ませる。
+        #   結果は「確認した本人の視点」にだけ入る私的情報。
+        #   何を見たかを他人に話すのは、ひとり言（ステップ5）の担当。
+        if valid_library_user is not None and ai_player.is_ai(valid_library_user) \
+                and game.get("ai_state") and not game.get("library_used_today"):
+            try:
+                tgt = ai_brain.pick_library_target(game, valid_library_user)
+                if tgt is not None:
+                    game["library_used_today"] = True
+                    ai_brain.record_library_result(
+                        game, valid_library_user, tgt, game["roles"][tgt])
+                    # 何と報告するか（嘘をつくかも含めて）はここで決まる。
+                    # 実際に喋るのは夜の議論の冒頭なので、取っておく。
+                    speech = ai_brain.library_report(
+                        game, valid_library_user, tgt, game["roles"][tgt])
+                    game["ai_library_report"] = (
+                        (valid_library_user, speech) if speech else None)
+                    logger.info(
+                        f"📖 AI {valid_library_user.display_name} が "
+                        f"{tgt.display_name} の役職を確認した")
+            except Exception:
+                logger.error(f"❌ AIの図書室確認に失敗: {traceback.format_exc()}")
+
 async def transition_to_night_phase(channel, game):
     game["votes"] = {}
     game["phase_voteresult_started"] = False
     game["vote_start"] = time.time()
     await update_vote_message(channel, game, is_first=True)
+
+    # ---- 夜の議論と、AIの投票 ----
+    if game.get("ai_state"):
+        # 図書室に入ったAIの報告が口火を切り、そのあと各自がコメントする
+        report = game.pop("ai_library_report", None)
+        game["ai_talk_task"] = asyncio.create_task(
+            run_ai_night_talk(channel, game, report=report))
+        game["ai_task"] = asyncio.create_task(run_ai_votes(channel, game))
 
 async def update_vote_message(channel, game, is_first=False):
     g_lang = get_game_lang(channel.id)
@@ -765,6 +871,13 @@ class VoteResultRevealView(discord.ui.View):
         else:
             exile_embed.description = t(g_lang, "msg", "exile_none")
 
+        # ---- 誰が誰に入れたか・誰が追放されたかを、翌朝の話題用に記録 ----
+        if game.get("ai_state"):
+            try:
+                ai_brain.record_vote_results(game, exiled_user)
+            except Exception:
+                logger.error(f"❌ 投票結果の記録に失敗: {traceback.format_exc()}")
+
         await interaction.channel.send(embed=exile_embed)
         await asyncio.sleep(1)
 
@@ -918,6 +1031,10 @@ class NextDayView(discord.ui.View):
         view = TriggerInputView(self.channel_id, game["host"])
         game["main_msg"] = await interaction.channel.send(content=get_mentions(game), embed=embed, view=view)
 
+        # ---- 新しい日の行動をAIに始めさせる ----
+        if game.get("ai_state"):
+            game["ai_task"] = asyncio.create_task(run_ai_actions(interaction.channel, game))
+
 async def update_attack_status_message(channel, game):
     g_lang = get_game_lang(channel.id)
     alive_players = [p for p in game["players"] if p not in game.get("dead", [])]
@@ -981,6 +1098,10 @@ class AttackInputView(discord.ui.View):
         target_id = self.target_select.values[0]
         role = game["roles"][interaction.user]
         is_alive = interaction.user not in game.get("dead", [])
+        # その日の自分の行先（カロンは談話室、セイレーンは操舵室でないと効力が出ない）。
+        # 選べてしまう仕様はそのままに、提出メッセージで「効かない」ことだけ伝える。
+        # （カロンは亡霊に談話室へ上書きされれば成立するので、断定せず条件だけを伝える）
+        own_dest = game.get("inputs", {}).get(interaction.user, {}).get("dest")
 
         if role == "charon" and is_alive:
             game["attacks"][interaction.user] = target_id
@@ -990,6 +1111,8 @@ class AttackInputView(discord.ui.View):
                 t_user = discord.utils.get(game["players"], id=int(target_id))
                 tgt_name = t_user.display_name if t_user else 'Unknown'
                 content = t(self.user_lang, "msg", "submit_attack_target", target=tgt_name)
+                if own_dest != "lounge":
+                    content += t(self.user_lang, "msg", "submit_attack_cond_note")
                 await interaction.response.edit_message(content=content, view=None)
         elif role == "siren" and is_alive:
             game["attacks"][interaction.user] = "none"   # 入力完了数のカウント用
@@ -1000,6 +1123,8 @@ class AttackInputView(discord.ui.View):
                 t_user = discord.utils.get(game["players"], id=int(target_id))
                 tgt_name = t_user.display_name if t_user else 'Unknown'
                 content = t(self.user_lang, "msg", "submit_mermaid_target", target=tgt_name)
+                if own_dest != "bridge":
+                    content += t(self.user_lang, "msg", "submit_no_effect_note")
                 await interaction.response.edit_message(content=content, view=None)
         else:
             game["attacks"][interaction.user] = "none"
@@ -1135,7 +1260,12 @@ class CharonTimerSetupView(discord.ui.View):
         
         view = CharonTimerActiveView(self.channel_id, self.host)
         timer_msg = await interaction.channel.send(embed=embed, view=view)
-        
+
+        # ---- AIカロンの予定を、人間のカロンにDMで知らせる ----
+        # 密談の頭に届かないと合わせようがないので、タイマーを待たずに送る。
+        if game.get("ai_state"):
+            await send_ai_charon_dm(interaction.channel, game)
+
         for _ in range(self.duration):
             if not game.get("charon_timer_active", False):
                 break
@@ -1159,6 +1289,11 @@ class CharonTimerSetupView(discord.ui.View):
         mentions = " ".join([p.mention for p in alive_players])
         game["attack_msg"] = await interaction.channel.send(content=mentions, embed=attack_embed, view=attack_view)
         game["attack_status_msg"] = game["attack_msg"]
+
+        # ---- AIの襲撃／呼び寄せを提出させる ----
+        if game.get("ai_state"):
+            game["ai_task"] = asyncio.create_task(
+                run_ai_attacks(interaction.channel, game))
 
 async def transition_to_charon_phase(channel, game):
     if game.get("main_msg"): await game["main_msg"].edit(content="", view=None)
@@ -1339,6 +1474,485 @@ async def update_main_message(channel, game):
     if game.get("main_msg"):
         try: await game["main_msg"].edit(content=content_str, embed=embed)
         except: pass
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 🤖 AIプレイヤーの代打（ボタンを押す代わりに入力を埋める）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _rank_str(rank):
+    """1st / 2nd / 3rd / 4th … の文字列（ActionInputView と同じ規則）"""
+    if rank == 1: return "1st"
+    if rank == 2: return "2nd"
+    if rank == 3: return "3rd"
+    return f"{rank}th"
+
+
+async def run_ai_actions(channel, game):
+    """
+    その日の行先を、AIの代わりに提出する。
+
+    ★なぜ一気に提出せず、時間差を付けるのか
+      このゲームは「誰が何番目に、何分何秒で出したか」が全員に見える。
+      人間はそこも読んで遊んでいる。AIが即答すると毎回上位を独占して
+      しまい、順位という情報そのものが壊れる。
+      なので ai_brain.AI_ACTION_DELAY_MIN〜MAX の範囲でばらけさせる。
+
+    ★途中でゲームが終わったりリセットされたりしても大丈夫なように、
+      1人提出するたびに「まだ同じゲームの同じ日か」を確認している。
+    """
+    day = game.get("day", 1)
+    try:
+        actions = ai_brain.decide_day_actions(game)
+    except Exception:
+        logger.error(f"❌ AIの行動決定に失敗: {traceback.format_exc()}")
+        return
+
+    # ★朝の議論は、行先が決まってからでないと作れない
+    #   （「今日は図書室に行くつもり」などを話すため）。
+    #   なので別タスクにせず、ここから始める。
+    game["ai_talk_task"] = asyncio.create_task(run_ai_morning_talk(channel, game))
+
+    targets = []
+    for p in game["players"]:
+        if not ai_player.is_ai(p):
+            continue
+        if p in game.get("inputs", {}):
+            continue
+        if p in game.get("dead", []):
+            # 死んだAI（亡霊）は、誰かの行先を談話室へ引きずり出せる。
+            try:
+                blocked = ai_brain.decide_ghost_block(game, p)
+            except Exception:
+                logger.error(f"❌ 亡霊の判断に失敗: {traceback.format_exc()}")
+                blocked = None
+            targets.append((p, {"ghost_target": str(blocked.id) if blocked else "none"}))
+        elif p in actions:
+            targets.append((p, actions[p]))
+
+    if not targets:
+        return
+
+    delays = sorted(random.uniform(ai_brain.AI_ACTION_DELAY_MIN,
+                                   ai_brain.AI_ACTION_DELAY_MAX)
+                    for _ in targets)
+    random.shuffle(targets)
+
+    waited = 0.0
+    for (p, act), delay in zip(targets, delays):
+        await asyncio.sleep(max(0.0, delay - waited))
+        waited = delay
+
+        g = games.get(channel.id)
+        # ゲームが消えた・別のゲームになった・日が変わった・
+        # ホストが「入力を終了」を押した → もう手を出さない
+        if g is not game or g.get("day") != day or g.get("phase_charon_started"):
+            return
+        if p in g["inputs"]:
+            continue
+
+        elapsed = int(time.time() - g.get("day_start", time.time()))
+        rank = len(g["inputs"]) + 1
+        entry = {"rank": _rank_str(rank), "rank_num": rank,
+                 "time": f"{elapsed // 60}m{elapsed % 60}s"}
+        if "ghost_target" in act:
+            entry.update({"type": "ghost", "target": act["ghost_target"]})
+        else:
+            entry.update({"type": "alive", "dest": act["dest"], "card": act["card"]})
+        g["inputs"][p] = entry
+
+        try:
+            # 全員そろったら次のフェーズへ。
+            # ★ActionInputView の submit_button と同じ判定。
+            #   既存のボタンには手を入れず、同じことをここでも行う。
+            if len(g["inputs"]) == len(g["players"]) and not g.get("phase_charon_started"):
+                g["phase_charon_started"] = True
+                g["day_end_time"] = time.time()
+                await update_main_message(channel, g)
+                await transition_to_charon_phase(channel, g)
+                return
+            await update_main_message(channel, g)
+        except Exception:
+            logger.error(f"❌ AIの入力反映に失敗: {traceback.format_exc()}")
+            return
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 🎭 AIの発言をwebhookで投稿する（見た目を人間のチャットに近づける）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# ★なぜwebhookを使うのか
+#   普通の channel.send だと9人ぶんの発言が全部「botの1人の発言」として
+#   まとまってしまい、名前は本文の中の太字にしかならない。
+#   webhookは1メッセージごとに名前とアイコンを指定できる唯一の方法なので、
+#   AI9人がそれぞれ別の人として喋っているように見える。
+#
+# ★権限が無いサーバーでも絶対に壊さないこと
+#   webhookを作るには「ウェブフックの管理」権限が要るが、
+#   すでに導入済みのサーバーには後から自動で権限が付かない。
+#   そこで「使えるなら使う、駄目なら今まで通り channel.send」に倒す。
+#   これで既存サーバーは何もしなくても従来どおり動く。
+
+# チャンネルに作るwebhookの名前。すでに同じ名前のものがあれば作り直さない
+# （webhookはチャンネルあたり15個までなので、毎ゲーム作ると枯渇する）。
+AI_WEBHOOK_NAME = "GhostLiner AI"
+
+# 人格ごとのアイコン画像URL。
+#
+# ★キーは ai_player.AI_NAME_POOL と同じ11個。
+#   ai_brain の人格割り当てが「表示名＝人格」なので（ai_brain.py の
+#   init_game 参照）、名前で引けばその人の人格のアイコンになる。
+#   つまり「探偵AIはいつもこの顔」が毎ゲーム保たれる。
+#
+# ★空文字のままでも動く（Discordのデフォルトアイコンになるだけ）。
+#   画像はどこかに置いた公開URLを貼る。手軽なのは、適当なチャンネルに
+#   11枚アップロードして、その画像のURLをコピーする方法。
+# ★画像を差し替えるときは、同じファイル名で上書きしないこと。
+#   Discordはアイコンを画像URL単位でキャッシュするので、中身だけ変えても
+#   古い絵のまま出続けることがある。差し替える時はファイル名ごと変える。
+_AVATAR_BASE = ("https://raw.githubusercontent.com/"
+                "naokiyoshida-utokyo/ghostliner-bot/main/avatars/")
+
+AI_AVATAR_URLS = {
+    "探偵AI":     _AVATAR_BASE + "tantei.png",
+    "芸能人AI":   _AVATAR_BASE + "geinoujin.png",
+    "美容師AI":   _AVATAR_BASE + "biyoushi.png",
+    "商人AI":     _AVATAR_BASE + "syounin.png",
+    "武道家AI":   _AVATAR_BASE + "butouka.png",
+    "猟師AI":     _AVATAR_BASE + "ryoushi.png",
+    "コックAI":   _AVATAR_BASE + "cook.png",
+    "小説家AI":   _AVATAR_BASE + "syousetsuka.png",
+    "大学生AI":   _AVATAR_BASE + "daigakusei.png",
+    "ゲーマーAI": _AVATAR_BASE + "gamer.png",
+    "遊び人AI":   _AVATAR_BASE + "asobinin.png",
+}
+
+# チャンネルID → webhook。False は「このチャンネルでは使えない（権限が無い）」。
+# 毎回さがしに行くとAPIを無駄に叩くので、結果を覚えておく。
+_ai_webhooks = {}
+
+
+def ai_avatar_url(player):
+    """
+    そのAIのアイコン画像URLを返す（無ければ None）。
+
+    ★名前プールを使い切ると「探偵AI2」のような名前になる。
+      その時は末尾の数字を落として引く。ai_brain の人格の引き方と同じ規則に
+      そろえてあるので、喋り方とアイコンがずれない。
+    """
+    name = getattr(player, "display_name", "")
+    url = AI_AVATAR_URLS.get(name)
+    if not url:
+        url = AI_AVATAR_URLS.get(name.rstrip("0123456789"))
+    return url or None
+
+
+async def get_ai_webhook(channel):
+    """
+    そのチャンネルでAIの発言に使うwebhookを返す。使えなければ None。
+
+    ★None が返るのは異常ではない。「ウェブフックの管理」権限が無いだけで、
+      呼び出し側は今まで通り channel.send に落ちればよい。
+    """
+    cached = _ai_webhooks.get(channel.id)
+    if cached is not None:
+        return cached or None       # False（使えない）なら None を返す
+
+    # DMなどwebhookを作れない場所。ゲームは通常のチャンネルで進むので
+    # ここに来ることはまず無いが、念のため。
+    if not hasattr(channel, "webhooks"):
+        _ai_webhooks[channel.id] = False
+        return None
+
+    try:
+        # --- すでに作ってあるものを探す ---
+        # ★token が無いものは送信に使えないので除外する。
+        #   （他のアプリが作ったwebhookはtokenが見えない）
+        for w in await channel.webhooks():
+            if w.name == AI_WEBHOOK_NAME and w.token:
+                _ai_webhooks[channel.id] = w
+                return w
+
+        # --- 無ければ作る ---
+        w = await channel.create_webhook(name=AI_WEBHOOK_NAME)
+        _ai_webhooks[channel.id] = w
+        return w
+
+    except discord.Forbidden:
+        # 権限が無い。これは想定内なので、エラーではなく情報として残す。
+        logger.info(
+            f"ℹ️ webhookを使えないチャンネル（ウェブフックの管理 権限なし）: "
+            f"{channel.id} → 従来の表示で続行します"
+        )
+        _ai_webhooks[channel.id] = False
+        return None
+    except Exception:
+        logger.error(f"❌ webhookの準備に失敗: {traceback.format_exc()}")
+        _ai_webhooks[channel.id] = False
+        return None
+
+
+async def send_ai_line(channel, player, text, mark):
+    """
+    AIの発言を1つ投稿する。
+
+    webhookが使えれば「その人の名前とアイコン」で投稿し、
+    使えなければ従来どおり「マーク **名前**: 本文」で投稿する。
+
+    ★mark は空文字でもよい（朝は空にしてある）。
+      アイコンで発言者が分かるようになった今、全行の頭に付く💬は情報量が
+      ゼロで、ただの繰り返し記号だった。夜の🌙と図書室報告の📖は
+      「いつもと違う場面」の目印として効くので残している。
+    """
+    webhook = await get_ai_webhook(channel)
+
+    if webhook is not None:
+        try:
+            await webhook.send(
+                content=f"{mark} {text}".strip(),
+                username=player.display_name,
+                avatar_url=ai_avatar_url(player),
+            )
+            return True
+        except discord.NotFound:
+            # 誰かがwebhookを手で消した。覚えていた分を捨てて作り直させる。
+            _ai_webhooks.pop(channel.id, None)
+        except discord.Forbidden:
+            # 途中で権限を外された。以後は従来の表示に落とす。
+            _ai_webhooks[channel.id] = False
+        except Exception:
+            logger.error(f"❌ webhookでの発言送信に失敗: {traceback.format_exc()}")
+            # ここでは諦めずに下の従来方式で送る（発言が消えるより良い）
+
+    try:
+        await channel.send(f"{mark} **{player.display_name}**: {text}".strip())
+        return True
+    except Exception:
+        logger.error(f"❌ AIの発言の送信に失敗: {traceback.format_exc()}")
+        return False
+
+
+async def post_ai_speeches(channel, game, lines, gap_min, gap_max, mark):
+    """
+    AIの発言を、少しずつ間を空けてチャットに流す。
+
+    ★一度にまとめて投稿すると、9人ぶんの発言が一瞬で流れて
+      「議論」に見えない。人が読める速さで、順に出す。
+    """
+    day = game.get("day", 1)
+    for p, line in lines:
+        await asyncio.sleep(random.uniform(gap_min, gap_max))
+        g = games.get(channel.id)
+        if g is not game or g.get("day") != day:
+            return          # ゲームが終わった/日が変わった → 途中でやめる
+        if not await send_ai_line(channel, p, line, mark):
+            return          # 送信に失敗した（送れない状態）→ 打ち切る
+
+
+async def run_ai_morning_talk(channel, game):
+    """朝の議論。AIが順にひとり言を投稿する。"""
+    try:
+        lines = ai_brain.morning_speeches(game)
+    except Exception:
+        logger.error(f"❌ 朝の発言の生成に失敗: {traceback.format_exc()}")
+        return
+    # ★朝はマーク無し。アイコンで誰の発言か分かるので、全行の頭に付く💬は
+    #   繰り返し記号にしかならない（夜🌙・図書室報告📖は場面の目印として残す）。
+    await post_ai_speeches(channel, game, lines,
+                           ai_brain.TALK_GAP_MIN, ai_brain.TALK_GAP_MAX, "")
+
+
+async def run_ai_night_talk(channel, game, report=None):
+    """
+    夜の議論。図書室の報告が口火を切り、そのあと各自がコメントする
+    （ルールブック通りの順番）。
+    """
+    if report is not None:
+        reporter, speech = report
+        await send_ai_line(channel, reporter, speech, "📖")
+    try:
+        lines = ai_brain.night_speeches(game)
+    except Exception:
+        logger.error(f"❌ 夜の発言の生成に失敗: {traceback.format_exc()}")
+        return
+    # ★夜もマーク無し（朝と同じ理由。アイコンで発言者が分かるので🌙は
+    #   繰り返し記号にしかならない）。図書室の報告📖だけは、その日1人しか
+    #   喋らない特別な発言なので目印を残してある。
+    await post_ai_speeches(channel, game, lines,
+                           ai_brain.TALK_GAP_MIN, ai_brain.TALK_GAP_MAX, "")
+
+
+async def send_ai_charon_dm(channel, game):
+    """
+    カロンの密談が始まったとき、人間のカロンにAIカロンの予定をDMで送る。
+
+    ★なぜ必要か
+      AIは人間の言葉を聞き取れない（LLMを使っていないため）。
+      密談は本来「息を合わせる場」なのに、AIが相手だと一方通行になる。
+      そこで、AI側の予定だけでも先に全部見せて、人間が合わせられるようにする。
+
+    ★情報漏洩について
+      送り先は「生きている人間のカロン」だけ。しかもカロン同士が
+      互いを知っているルール（rules["charon"]）のときに限る。
+      互いを知らない設定なら、これを送ると仲間が誰か分かってしまう。
+    """
+    if not game.get("ai_state"):
+        return
+    if not game.get("rules", {}).get("charon", True):
+        return
+
+    dead = game.get("dead", [])
+    humans = [p for p in game["players"]
+              if game["roles"].get(p) == "charon"
+              and not ai_player.is_ai(p) and p not in dead]
+    if not humans:
+        return
+
+    try:
+        plans = ai_brain.charon_talk_plans(game)
+    except Exception:
+        logger.error(f"❌ AIカロンの予定の取得に失敗: {traceback.format_exc()}")
+        return
+    if not plans:
+        return
+
+    g_lang = get_game_lang(channel.id)
+    day = game.get("day", 1)
+
+    for human in humans:
+        p_lang = USER_LANGS.get(human.id, g_lang)
+        lines = [t(p_lang, "msg", "dm_ai_charon_header", day=day)]
+        for ai, plan in plans.items():
+            name = ai.display_name
+            if plan["dest"] == "bridge":
+                key = "dm_ai_charon_bridge_x" if plan["card"] == "x" else "dm_ai_charon_bridge_c"
+                lines.append(t(p_lang, "msg", key, name=name))
+            elif plan["dest"] == "library":
+                lines.append(t(p_lang, "msg", "dm_ai_charon_library", name=name))
+            elif plan["attack"] is not None:
+                lines.append(t(p_lang, "msg", "dm_ai_charon_attack",
+                               name=name, target=plan["attack"].display_name))
+            else:
+                lines.append(t(p_lang, "msg", "dm_ai_charon_no_attack", name=name))
+        lines.append(t(p_lang, "msg", "dm_ai_charon_footer"))
+
+        try:
+            await human.send(content="\n".join(lines))
+        except discord.Forbidden:
+            logger.warning(f"⚠️ {human.display_name} にカロンの密談DMを送れませんでした")
+        except Exception:
+            logger.error(f"❌ カロンの密談DMの送信に失敗: {traceback.format_exc()}")
+
+
+async def run_ai_attacks(channel, game):
+    """
+    カロンの襲撃・セイレーンの呼び寄せを、AIの代わりに提出する。
+
+    ★このフェーズは「生きている人全員が入力し終わる」まで進まない。
+      カロンでもセイレーンでもない人も「なし」を出す必要があるので、
+      生きているAI全員ぶんを埋める。
+    """
+    day = game.get("day", 1)
+    try:
+        plans = ai_brain.decide_attacks(game)
+    except Exception:
+        logger.error(f"❌ AIの襲撃判断に失敗: {traceback.format_exc()}")
+        return
+    if not plans:
+        return
+
+    items = list(plans.items())
+    random.shuffle(items)
+    delays = sorted(random.uniform(ai_brain.AI_ATTACK_DELAY_MIN,
+                                   ai_brain.AI_ATTACK_DELAY_MAX) for _ in items)
+
+    waited = 0.0
+    for (p, choice), delay in zip(items, delays):
+        await asyncio.sleep(max(0.0, delay - waited))
+        waited = delay
+
+        g = games.get(channel.id)
+        if g is not game or g.get("day") != day or g.get("phase_result_started"):
+            return
+        if p in g.get("attacks", {}) or p in g.get("dead", []):
+            continue
+
+        role = g["roles"].get(p)
+        g.setdefault("attacks", {})
+        g.setdefault("mermaids", {})
+        if role == "charon" and choice["attack"] is not None:
+            g["attacks"][p] = str(choice["attack"].id)
+        elif role == "siren":
+            # セイレーンは attacks に "none" を入れて入力済みとして数え、
+            # 実際の呼び寄せ先は mermaids に入れる（人間の入力と同じ形）
+            g["attacks"][p] = "none"
+            g["mermaids"][p] = str(choice["charm"].id) if choice["charm"] else "none"
+        else:
+            g["attacks"][p] = "none"
+
+        try:
+            await update_attack_status_message(channel, g)
+            alive_players = [q for q in g["players"] if q not in g.get("dead", [])]
+            if len(g["attacks"]) == len(alive_players) and not g.get("phase_result_started"):
+                g["phase_result_started"] = True
+                if g.get("attack_msg"):
+                    await g["attack_msg"].edit(view=None)
+                await channel.send(view=ResultRevealView(channel.id, g["host"]))
+                return
+        except Exception:
+            logger.error(f"❌ AIの襲撃入力の反映に失敗: {traceback.format_exc()}")
+            return
+
+
+async def run_ai_votes(channel, game):
+    """夜の投票を、AIの代わりに提出する。"""
+    day = game.get("day", 1)
+    try:
+        votes = ai_brain.decide_votes(game)
+    except Exception:
+        logger.error(f"❌ AIの投票判断に失敗: {traceback.format_exc()}")
+        return
+    if not votes:
+        return
+
+    items = list(votes.items())
+    random.shuffle(items)
+    delays = sorted(random.uniform(ai_brain.AI_VOTE_DELAY_MIN,
+                                   ai_brain.AI_VOTE_DELAY_MAX) for _ in items)
+
+    waited = 0.0
+    for (p, target), delay in zip(items, delays):
+        await asyncio.sleep(max(0.0, delay - waited))
+        waited = delay
+
+        g = games.get(channel.id)
+        if g is not game or g.get("day") != day or g.get("phase_voteresult_started"):
+            return
+        if p in g.get("votes", {}) or p in g.get("dead", []):
+            continue
+
+        elapsed = int(time.time() - g.get("vote_start", time.time()))
+        rank = len(g["votes"]) + 1
+        g["votes"][p] = {"target": str(target.id) if target is not None else "none",
+                         "rank": _rank_str(rank), "rank_num": rank,
+                         "time": f"{elapsed // 60}m{elapsed % 60}s"}
+
+        try:
+            alive_players = [q for q in g["players"] if q not in g.get("dead", [])]
+            if len(g["votes"]) == len(alive_players) and not g.get("phase_voteresult_started"):
+                g["phase_voteresult_started"] = True
+                g["vote_end_time"] = time.time()
+                await update_vote_message(channel, g)
+                if g.get("vote_msg"):
+                    await g["vote_msg"].edit(view=None)
+                g_lang = get_game_lang(channel.id)
+                await channel.send(content=t(g_lang, "msg", "vote_all_done"),
+                                   view=VoteResultRevealView(channel.id, g["host"]))
+                return
+            await update_vote_message(channel, g)
+        except Exception:
+            logger.error(f"❌ AIの投票の反映に失敗: {traceback.format_exc()}")
+            return
+
 
 class TriggerInputView(discord.ui.View):
     def __init__(self, channel_id, host):
@@ -1573,7 +2187,12 @@ class RoleSetupView(discord.ui.View):
         self.lang = lang
         self.n = len(players)
         self.counts = get_default_role_counts(self.n)
-        self.apply_prefs = False  # デフォルトは反映しない
+        # 役職希望（なりたい／なりたくない）を反映するか。
+        # ★デフォルトON。募集画面で希望を出した人がいるのに、
+        #   ホストがボタンを押し忘れて無視されるのを防ぐため。
+        #   誰も希望を出していなければ、ONでも完全なランダム配役になる
+        #   （assign_roles_with_prefs は希望が空なら普通に randomize する）。
+        self.apply_prefs = True
         self._build_items()
 
     def _build_items(self):
@@ -1588,10 +2207,13 @@ class RoleSetupView(discord.ui.View):
         confirm.callback = self._confirm
         self.add_item(confirm)
         # 役職希望トグル(row4)
+        # ★ON/OFFのどちらでも赤(danger)にしてある。緑＋グレーだと他のボタンに
+        #   埋もれてホストが気づかず、希望が無視されたまま開始される事故が
+        #   あったため、目立つ色で固定する。ON/OFFはラベルの文字で分かる。
         on_off = "ON" if self.apply_prefs else "OFF"
         self.prefs_btn = discord.ui.Button(
             label=f"{t(self.lang, 'settings', 'rule_prefs')}: {on_off}",
-            style=discord.ButtonStyle.success if self.apply_prefs else discord.ButtonStyle.secondary,
+            style=discord.ButtonStyle.danger,
             row=4)
         self.prefs_btn.callback = self._toggle_prefs
         self.add_item(self.prefs_btn)
@@ -1654,6 +2276,35 @@ class RoleSetupView(discord.ui.View):
         if self._total() != self.n:
             await interaction.response.send_message(t(u_lang, "msg", "err_role_count"), ephemeral=True)
             return
+
+        # ─────────────────────────────────────────────
+        # AIが参加している場合の歯止め
+        # ─────────────────────────────────────────────
+        # ホストは役職の数を自由にいじれるが、AIの推理エンジンは
+        # 決まった構成しか知らない。対応外の構成のまま始めると、
+        # AIが「ありうる配役の一覧」を作れず何も判断できなくなる。
+        # 始まってから壊れるより、ここで止めた方がまし。
+        #
+        # ★AIが1人もいなければ、このチェックは丸ごと素通りする。
+        #   人間だけで遊ぶ時は今まで通り、どんな構成でも自由。
+        n_ai = sum(1 for p in self.players if ai_player.is_ai(p))
+        if n_ai:
+            ok, why, info = ai_player.check_composition(self.n, self.counts, n_ai=n_ai)
+            if not ok:
+                if why == "max_players":
+                    msg = t(u_lang, "msg", "err_ai_max_players", max=info["max"], n=info["n"])
+                elif why == "role":
+                    # AIが知らない役職（現状はハデスだけ）。役職名は各国語に訳す。
+                    names = "/".join(t(u_lang, "roles", key) for key in info["roles"])
+                    msg = t(u_lang, "msg", "err_ai_role_unsupported",
+                            roles=names, siren=t(u_lang, "roles", "siren"))
+                else:
+                    # 組み合わせが多すぎる（人数ではなく内訳の問題）
+                    msg = t(u_lang, "msg", "err_ai_too_complex",
+                            load=f"{info['load']:,}", limit=f"{info['limit']:,}")
+                await interaction.response.send_message(msg, ephemeral=True)
+                return
+
         await interaction.message.delete()
         rule_view = RuleSetupView(self.host, self.players, self.counts, self.lang, self.apply_prefs)
         embed = discord.Embed(title=t(self.lang, "msg", "setup_rule_title"), color=0x808080)
@@ -1748,12 +2399,25 @@ class RecruitView(discord.ui.View):
         self.spectators = set()
         self.preferences = {}  # Member -> role_key（なりたい：具体的な希望のみ）
         self.anti_preferences = {}  # Member -> role_key（なりたくない：1つのみ）
-        
+
+        # AIプレイヤー。人間とは別のリストで持つ。
+        # ★人間は set（順不同の集合）だが、AIは list（順序つき）にしている。
+        #   「AIを外す」で最後に足した1体を外したいので、順序が要るため。
+        #   また、人間の参加/退出処理（self.players を触る部分）に
+        #   一切手を入れずに済むという利点もある。
+        self.ai_players = []
+
         self.join_button.label = t(lang, "ui", "btn_join")
         self.join_pref_button.label = t(lang, "ui", "btn_join_pref")
         self.spectate_button.label = t(lang, "ui", "btn_spectate")
         self.leave_button.label = t(lang, "ui", "btn_leave")
+        self.add_ai_button.label = t(lang, "ui", "btn_add_ai")
+        self.remove_ai_button.label = t(lang, "ui", "btn_remove_ai")
         self.start_button.label = t(lang, "ui", "btn_close_recruit")
+
+    def all_players(self):
+        """人間とAIを合わせた参加者一覧。ゲーム開始時にはこれを使う。"""
+        return list(self.players) + self.ai_players
 
     @discord.ui.button(style=discord.ButtonStyle.success, row=0, custom_id="btn_join")
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1794,6 +2458,67 @@ class RecruitView(discord.ui.View):
         self.anti_preferences.pop(interaction.user, None)
         await self.update_message(interaction)
 
+    # ─────────────────────────────────────────────
+    # AIプレイヤーの追加／削除（ホスト専用）
+    # ─────────────────────────────────────────────
+    # ★ホスト専用にしている理由：
+    #   参加/観戦/退出は「自分のこと」なので誰でも押せるが、
+    #   AIを足すのは卓の人数構成を変える行為なので、締め切りボタンと
+    #   同じくホストの判断に任せる。
+
+    @discord.ui.button(style=discord.ButtonStyle.secondary, row=1, custom_id="btn_add_ai")
+    async def add_ai_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        update_last_active(interaction.channel_id)
+        u_lang = get_user_lang(interaction)
+        if interaction.user != self.host:
+            await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
+            return
+
+        # AIが推理できる人数には上限がある。
+        # 上限に達していたら、ここで足すのをやめる。
+        # ★ここで止めておかないと、役職設定の画面まで進んでから
+        #   「その人数では無理です」と言われることになり、
+        #   募集からやり直しになってしまう。
+        limit = ai_player.max_players_with_ai()
+        total = len(self.players) + len(self.ai_players)
+        if total >= limit:
+            await interaction.response.send_message(
+                t(u_lang, "msg", "err_ai_limit", max=limit, total=total), ephemeral=True)
+            return
+
+        # 人数だけでなく「推理の重さ」でも止める。
+        # ★役職の内訳はこの画面では未確定なので、初期値の構成で見積もる。
+        #   ホストが後から役職をいじって重くした場合は、役職設定の画面で
+        #   改めて弾かれる（そちらが最終判定）。
+        ok, why, info = ai_player.check_composition(
+            total + 1, get_default_role_counts(total + 1),
+            n_ai=len(self.ai_players) + 1)
+        if not ok and why == "too_complex":
+            await interaction.response.send_message(
+                t(u_lang, "msg", "err_ai_too_complex",
+                  load=f"{info['load']:,}", limit=f"{info['limit']:,}"), ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        # 既存の参加者（人間・AI両方）を渡して、名前とIDの重複を避けてもらう
+        self.ai_players.extend(ai_player.make_ai_players(1, existing_players=self.all_players()))
+        await self.update_message(interaction)
+
+    @discord.ui.button(style=discord.ButtonStyle.secondary, row=1, custom_id="btn_remove_ai")
+    async def remove_ai_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        update_last_active(interaction.channel_id)
+        u_lang = get_user_lang(interaction)
+        if interaction.user != self.host:
+            await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        if self.ai_players:
+            # 最後に足した1体を外す
+            self.ai_players.pop()
+        # AIが0体のときは何も起きない（エラーを出すほどのことではない）
+        await self.update_message(interaction)
+
     @discord.ui.button(style=discord.ButtonStyle.primary, row=1, custom_id="btn_start_rec")
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         update_last_active(interaction.channel_id)
@@ -1801,23 +2526,41 @@ class RecruitView(discord.ui.View):
         if interaction.user != self.host:
             await interaction.response.send_message(t(u_lang, "msg", "err_host_only"), ephemeral=True)
             return
-            
+
+        # ★AIを足した後から人間が参加してくると、上限を超えることがある。
+        #   （AI追加時のチェックだけでは防げない）
+        #   ここで最終確認する。
+        if self.ai_players:
+            limit = ai_player.max_players_with_ai()
+            total = len(self.players) + len(self.ai_players)
+            if total > limit:
+                await interaction.response.send_message(
+                    t(u_lang, "msg", "err_ai_limit", max=limit, total=total), ephemeral=True)
+                return
+
         games[interaction.channel_id] = {
-            "host": self.host, "players": list(self.players), "spectators": list(self.spectators), "inputs": {}, "dead": [], 
+            "host": self.host, "players": self.all_players(), "spectators": list(self.spectators), "inputs": {}, "dead": [],
             "blocked_yesterday": [], "history": {}, "day": 1, "used_library": [], "last_active": time.time(),
             "lang": self.lang,
             "prefs": {p: r for p, r in self.preferences.items() if p in self.players},
             "anti_prefs": {p: r for p, r in self.anti_preferences.items() if p in self.players}
         }
         await interaction.message.delete()
-        setup_view = RoleSetupView(host=self.host, players=list(self.players), lang=self.lang)
+        # ★AIもここに含める。人間だけを渡すと、役職設定の画面が
+        #   人間の人数で役職を割り振ろうとしてしまう。
+        setup_view = RoleSetupView(host=self.host, players=self.all_players(), lang=self.lang)
         await interaction.channel.send(embed=setup_view.build_embed(), view=setup_view)
 
     def build_embed(self):
-        player_names = "\n".join([f"- {p.display_name}" for p in self.players]) or "-"
+        # ★AIも「参加者」として同じ一覧に並べる。
+        #   名前の末尾に（AI）が付いているので、専用の欄を作らなくても
+        #   人間と見分けがつく。欄を分けると翻訳ファイルにも手を入れる
+        #   ことになるので、ここは既存の表示をそのまま使う。
+        all_p = self.all_players()
+        player_names = "\n".join([f"- {p.display_name}" for p in all_p]) or "-"
         spectator_names = "\n".join([f"- {s.display_name}" for s in self.spectators]) or "-"
         embed = discord.Embed(title=t(self.lang, "msg", "recruit_title"), color=0x808080)
-        embed.description = t(self.lang, "msg", "recruit_desc", host=self.host.display_name, p_count=len(self.players), p_list=player_names, s_count=len(self.spectators), s_list=spectator_names)
+        embed.description = t(self.lang, "msg", "recruit_desc", host=self.host.display_name, p_count=len(all_p), p_list=player_names, s_count=len(self.spectators), s_list=spectator_names)
         if os.path.exists("banner.jpg"):
             embed.set_image(url="attachment://banner.jpg")
         return embed
@@ -2064,6 +2807,12 @@ async def distribute_roles(channel, players, counts, rules, settings, apply_pref
     view = TriggerInputView(channel.id, game["host"])
     game["main_msg"] = await channel.send(content=get_mentions(game), embed=day_embed, view=view)
 
+    # ---- AIプレイヤーの頭脳を用意して、1日目の行動を始めさせる ----
+    # init_game は、AIが1人もいなければ何もせず None を返す。
+    # つまり人間だけのゲームには一切影響しない。
+    if ai_brain.init_game(game):
+        game["ai_task"] = asyncio.create_task(run_ai_actions(channel, game))
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 🌟 スラッシュコマンド
@@ -2170,13 +2919,29 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 起動処理
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 放置された卓を自動で終了させるまでの時間（秒）
+RECRUIT_TIMEOUT = 3600      # 募集段階（まだ開始していない）
+GAME_TIMEOUT = 86400        # ゲーム進行中
+# ★AI入りの卓だけ短くする理由
+#   AIは「ありうる配役の全パターン（世界）」を丸ごとメモリに持つ。
+#   9人＋AI3体で約7MB、11人＋AI3体で約35MB。本番は512MBの
+#   サーバなので、放棄された卓が24時間居座ると、遊んでいないのに
+#   メモリを掴んだままになる。AI無しの卓は世界を持たない（ほぼ0MB）ので
+#   従来どおりでよい。
+AI_GAME_TIMEOUT = 21600     # ゲーム進行中＋AIが1人でもいる（6時間）
+
+
 @tasks.loop(hours=1.0)
 async def cleanup_inactive_games():
     current_time = time.time()
     to_delete = []
     for channel_id, game in games.items():
-        # 募集段階(まだ開始していない)は1時間、ゲーム進行中は24時間で自動終了
-        threshold = 86400 if "players" in game else 3600
+        if "players" not in game:
+            threshold = RECRUIT_TIMEOUT
+        elif any(ai_player.is_ai(p) for p in game["players"]):
+            threshold = AI_GAME_TIMEOUT
+        else:
+            threshold = GAME_TIMEOUT
         if current_time - game.get("last_active", current_time) > threshold:
             to_delete.append(channel_id)
             
