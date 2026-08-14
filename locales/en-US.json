@@ -143,7 +143,9 @@
     "select_pref_reject": "Role you don't want (up to 1)",
     "opt_pref_none": "None",
     "btn_pref_submit": "Submit preferences",
-    "btn_pref_resubmit": "Resubmit preferences"
+    "btn_pref_resubmit": "Resubmit preferences",
+    "btn_add_ai": "Add AI (Host)",
+    "btn_remove_ai": "Remove AI (Host)"
   },
   "msg": {
     "err_host_only": "This action is for the host only!",
@@ -198,6 +200,15 @@
     "attack_end_title": "🗡️ Charon's Attack Ended",
     "submit_attack_none": "Submitted: 【Do not attack anyone】.",
     "submit_attack_target": "Submitted: Attack target 【{target}】.",
+    "dm_ai_charon_header": "🤫 **Day {day} - Charon's Secret Talk**\nHere are today's plans from your AI Charon(s).\n",
+    "dm_ai_charon_bridge_c": "・**{name}**: Going to the Bridge and playing [O].",
+    "dm_ai_charon_bridge_x": "・**{name}**: Going to the Bridge and playing [X].",
+    "dm_ai_charon_library": "・**{name}**: Going to the Library.",
+    "dm_ai_charon_attack": "・**{name}**: Going to the Lounge and attacking 【{target}】.",
+    "dm_ai_charon_no_attack": "・**{name}**: Going to the Lounge, but attacking no one.",
+    "dm_ai_charon_footer": "\nWe AIs cannot hear what you say. Since we can't answer you, we tell you our plans without hiding anything. The rest is up to you. Let's stay in step and win this together.",
+    "submit_attack_cond_note": " This takes effect only if your destination was the Lounge (either you chose the Lounge yourself, or a Ghost overwrote your destination to the Lounge).",
+    "submit_no_effect_note": " However, you do not meet the conditions for attacking/interfering, so it will have no effect.",
     "attack_prompt": "Charon, select an attack target. If not attacking, select 'Do not attack anyone'.\n* For non-Charons, attacks will not trigger regardless of the choice.",
     "ghost_prompt": "You are a Ghost.\nYou can overwrite any player's destination to the Lounge. However, you cannot block a player who was blocked the previous day.",
     "setup_need": "Bridge Required Number: {n} players",
@@ -241,7 +252,6 @@
     "attack_end_title_siren": "🗡️ Charon's Attack / Siren's Interference has ended",
     "submit_mermaid_none": "Submitted: [Interfere with no one].",
     "submit_mermaid_target": "Submitted [{target}] as your interference target (lured to the Bridge).",
-    "mermaid_invalid_warn": "\n* Your interference is invalid because you did not choose the Bridge.",
     "dm_siren_charon": "\nIdentity of Charon: {others}",
     "dm_siren_ally": "\nFellow Sirens: {others}",
     "dm_siren_alone": "\nFellow Sirens: You are the only one.",
@@ -254,7 +264,11 @@
     "faction_charon": "[Charon Faction]",
     "setup_role_total": "Participants: {n} / Total set: {total}",
     "setup_role_total_warn": "⚠️ The total does not match the number of participants. Adjust with +/-.",
-    "setup_role_total_ok": "✅ The total matches. Press \"Next\"."
+    "setup_role_total_ok": "✅ The total matches. Press \"Next\".",
+    "err_ai_limit": "AI players are supported for up to {max} players in total. (Currently {total})\nRemove an AI, or reduce the number of players.",
+    "err_ai_max_players": "AI players are supported for up to {max} players. (Currently {n})\nRemove an AI, or reduce the number of players.",
+    "err_ai_role_unsupported": "The AI cannot play in a setup that includes 【{roles}】.\nReplace it with {siren}, or use /reset and start over without AI players.",
+    "err_ai_too_complex": "This role setup is too complex for the AI to reason about. ({load} combinations / limit {limit})\nReduce the roles that have several copies (Charon, Siren), or use fewer AI players."
   },
   "display": {
     "ghost_no_block": "➖No Interference",
@@ -267,7 +281,8 @@
     "attack_self_destruct": "💀Attacked {target} & Self-destructed",
     "attack_killed": "💀Killed at {dest}",
     "shortage": "Not Enough Players",
-    "siren_dragged": "🧜Bridge (charmed by the Siren)"
+    "siren_dragged": "🧜Bridge (charmed by the Siren)",
+    "attack_killed_siren": "💀Killed at {dest} (Charmed)"
   },
   "settings": {
     "rule_nav_knows": "Navigator Knows",
